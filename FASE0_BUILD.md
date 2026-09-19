@@ -231,8 +231,45 @@ con `FusedLocationProviderClient`, y escribe `gps.csv` y `all_gps.csv`.
    no del fix — mete el error de antigüedad del fix que del lado PC se midió en
    508 ms de mediana.
 
-**Fase 1 pasa de «implementar GPS» a «corregir la fuente de timestamp, agregar
-speed y alinear el formato».**
+### Confirmado con datos (grabación del 19/9/2026, 31 s, S23)
+
+| | Medido |
+|---|---|
+| Fixes de GPS | **32 en 31.0 s → 1.00 Hz exacto** (dt mediana 1001 ms, rango 989–1029) |
+| `gps.csv` | **vacío**: solo la cabecera, 65 bytes |
+| `all_gps.csv` | 32 filas con datos válidos |
+| Columnas 1 y 5 | **idénticas** (diferencia mediana 0.0 ms) |
+| Frames | 942 en 31.37 s → 30.00 fps, dt 33.33 ms, 0 saltos |
+| IMU | 52.90 Hz |
+| `fx` / `fy` | 2766.13 / 2768.51 → **el bug §5 sigue** |
+
+**`gps.csv` está vacío porque `recordGpsValue()` no tiene ningún llamador.** Es
+código muerto: `startRecording()` abre el archivo y escribe la cabecera, pero
+nadie le agrega filas. El único archivo con datos es `all_gps.csv`.
+
+**El timestamp roto, decodificado:** `1789850267971` interpretado como
+milisegundos Unix da `2026-09-19 20:37:47 UTC`, que es la hora real de la
+grabación. Como nanosegundos daría 1970. Es `System.currentTimeMillis()`.
+
+**La incompatibilidad de relojes, medida:**
+
+```
+camara (elapsedRealtimeNanos) : 3772698269000 ns = 3772.7 s desde el arranque
+IMU    (SensorEvent.timestamp): 3772732448519 ns = 3772.7 s desde el arranque
+GPS    (currentTimeMillis)    : 1789850267971 ms = reloj de pared
+```
+
+Cámara e IMU comparten base de tiempo. **El GPS está en otro reloj y no se puede
+alinear con ellos.** Es exactamente lo que advierte el §5 del contexto.
+
+**Fase 1 pasa de «implementar GPS» a un parche chico:**
+
+1. Cambiar `System.currentTimeMillis()` por `location.getElapsedRealtimeNanos()`
+2. Agregar la columna `speed` desde `location.getSpeed()`
+3. Decidir qué hacer con `gps.csv` (cablear `recordGpsValue()` o eliminarlo) y
+   producir `location.csv` con el formato del §6
+4. Subir `DEFAULT_UPDATE_INTERVAL` / `FAST_UPDATE_INTERVAL` para pedir 10 Hz
+   y medir qué entrega el hardware (Fase 0.5)
 
 ### §6 — «a `movie_metadata.csv` y `gyro_accel.csv` les falta la última columna»
 
