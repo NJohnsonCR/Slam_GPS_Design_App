@@ -168,3 +168,9 @@ fabric.properties
 !/gradle/wrapper/gradle-wrapper.jar
 
 # End of https://www.toptal.com/developers/gitignore/api/androidstudio,java,linux
+### Específico de MARS Logger (heredado de upstream) ###
+Thumbs.db
+.DS_Store
+.idea
+.navigation
+output.json 
