@@ -1,4 +1,4 @@
-package edu.osu.pcv.marslogger;
+package edu.osu.pcv.marslogger.streaming;
 
 import android.os.SystemClock;
 
@@ -21,16 +21,11 @@ import java.util.concurrent.atomic.AtomicLong;
 import timber.log.Timber;
 
 /**
- * TFG (Fase 2): sends sensor measurements to the PC over UDP, one line per datagram,
- * in the same format as the CSV rows (CONTEXTO_APP_ANDROID.md §4.3).
+ * Streams sensor measurements to a PC over UDP, one CSV row per datagram.
  *
- * The PC speaks first: it sends "SUBSCRIBE" to this port. The phone remembers where it
- * came from, answers "SUBSCRIBED", and from then on sends every measurement there. This
- * keeps the phone as the server (§3), so the PC's IP never has to be typed on the phone.
- *
- * send() never blocks: it enqueues, and if the queue is full the line is dropped and
- * counted. A separate thread does the actual sending, because Android forbids network
- * I/O on the main thread.
+ * The PC subscribes by sending "SUBSCRIBE" to this port and repeating it every few seconds;
+ * the phone replies "SUBSCRIBED" and streams to the latest subscriber. send() never blocks:
+ * rows are queued for a sender thread and dropped if the queue is full.
  */
 public class SensorStreamer {
 
@@ -39,7 +34,7 @@ public class SensorStreamer {
     private static final String SUBSCRIBE = "SUBSCRIBE";
     private static final byte[] SUBSCRIBED = "SUBSCRIBED".getBytes(StandardCharsets.UTF_8);
     private static final int QUEUE_CAPACITY = 256;
-    // The PC re-sends SUBSCRIBE every 2 s. Without one for this long, it is shown as silent.
+    // A subscriber that has not sent SUBSCRIBE for this long is reported as silent.
     private static final long SUBSCRIBER_TIMEOUT_MS = 5000;
 
     private final int mPort;
@@ -79,7 +74,7 @@ public class SensorStreamer {
     /** Queues one line for the current subscriber. Never blocks. */
     public void send(String line) {
         if (!mRunning || mSubscriber == null) {
-            return;     // nobody is listening: nothing to send, and nothing lost
+            return;     // no subscriber yet
         }
         if (!mQueue.offer(line)) {
             mDropped.incrementAndGet();
@@ -127,8 +122,8 @@ public class SensorStreamer {
     }
 
     /**
-     * IPv4 addresses the PC can use to reach this phone: WiFi, the phone's own hotspot, or
-     * USB tethering. Cellular interfaces are skipped because the PC cannot reach them.
+     * IPv4 addresses a PC on the same network can reach: WiFi, hotspot or USB tethering.
+     * Cellular interfaces are skipped.
      */
     public static List<String> localIpv4Addresses() {
         List<String> addresses = new ArrayList<>();

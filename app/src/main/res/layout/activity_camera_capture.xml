@@ -45,8 +45,7 @@
 
     <include layout="@layout/content_preview"/>
 
-    <!-- TFG: phone IP and UDP streaming state, updated every second.
-         Here and not in content_preview, which the photo screen shares. -->
+    <!-- Streaming status. Declared here because content_preview is shared with the photo screen. -->
     <TextView
         android:id="@+id/streamStatus_text"
         android:layout_width="wrap_content"

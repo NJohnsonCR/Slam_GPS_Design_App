@@ -58,10 +58,8 @@ public class FocalLengthHelper {
      * First it tries to use values read from LENS_INTRINSIC_CALIBRATION, if not available,
      * it will compute focal length based on an empirical model.
      *
-     * Both branches are expressed in sensor pixels and must be scaled to the output
-     * image (mImageSize) with imageScale(). LENS_INTRINSIC_CALIBRATION is defined in
-     * the pre-correction active array coordinate system (e.g. 4080x3060), not in the
-     * output image (e.g. 1280x720).
+     * Both LENS_INTRINSIC_CALIBRATION and the empirical model are in active array pixels,
+     * so both are scaled to the output image with imageScale().
      *
      * focus distance is the inverse of the distance between the lens and the subject,
      * assuming LENS_INFO_FOCUS_DISTANCE_CALIBRATION is APPROXIMATE or CALIBRATED.
@@ -79,8 +77,6 @@ public class FocalLengthHelper {
      */
     public SizeF getFocalLengthPixel() {
         if (mIntrinsic != null && mIntrinsic[0] > 1.0) {
-            // TFG: upstream returned mIntrinsic unscaled, i.e. in active array pixels.
-            // On a Galaxy S23 that wrote fx = 2766 for a 1280x720 video instead of ~868.
             float scale = imageScale();
             return new SizeF(scale * mIntrinsic[0], scale * mIntrinsic[1]);
         }
@@ -107,11 +103,7 @@ public class FocalLengthHelper {
         return new SizeF(1.0f, 1.0f);
     }
 
-    /**
-     * The output image fills the crop region along one axis and is cropped along the
-     * other. True when the image is wider than the crop region, so its width spans the
-     * full crop width.
-     */
+    /** True if the output image spans the full width of the crop region. */
     private boolean isWidthLimited() {
         float cropAspect = (float) mCropRegion.width() / mCropRegion.height();
         float imageAspect = (float) mImageSize.getWidth() / mImageSize.getHeight();
@@ -119,10 +111,8 @@ public class FocalLengthHelper {
     }
 
     /**
-     * Factor that converts active array pixels to output image pixels.
-     * Assumes CONTROL_ZOOM_RATIO is 1.0, which holds because setZoomRatio() is never
-     * called; with a different zoom ratio the crop region would be relative to the
-     * zoomed field of view and this factor would need to account for it.
+     * Converts active array pixels to output image pixels.
+     * Assumes CONTROL_ZOOM_RATIO is 1, which holds because this app never sets it.
      */
     private float imageScale() {
         if (isWidthLimited()) {

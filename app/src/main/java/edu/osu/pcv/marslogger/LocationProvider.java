@@ -29,10 +29,7 @@ public class LocationProvider {
     FusedLocationProviderClient fusedLocationClient;
 
     // for handling gps updates
-    // TFG (Fase 0.5): upstream pedía 1000 ms, y ese era el origen del "1 Hz"
-    // que se venía tomando por un límite del dispositivo. Se pide 10 Hz para
-    // medir qué entrega realmente el hardware; el proveedor fusionado puede
-    // entregar menos, y ese número es justamente el que hay que reportar.
+    // Request 10 Hz; the fused provider decides the actual rate (about 2 Hz on a Galaxy S23).
     private static final long DESIRED_UPDATE_INTERVAL_MS = 100;
     private static final long FASTEST_UPDATE_INTERVAL_MS = 100;
 

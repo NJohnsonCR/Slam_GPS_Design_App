@@ -6,23 +6,15 @@ import java.io.BufferedWriter;
 import java.io.FileWriter;
 import java.io.IOException;
 
+import edu.osu.pcv.marslogger.streaming.SensorStreamer;
 import timber.log.Timber;
 
 /**
  * this class is mostly similar to IMUManager because gps data must be logged at the same time
  * as the imu data (but in a separate file)
  *
- * TFG: reescrito para que las posiciones sean alineables con la cámara y la IMU.
- * Ver FASE0_BUILD.md §6. Tres cambios respecto de upstream:
- *
- *   1. El timestamp sale de Location.getElapsedRealtimeNanos(), que es el mismo
- *      reloj monótono (CLOCK_BOOTTIME) que usan CaptureResult.SENSOR_TIMESTAMP y
- *      SensorEvent.timestamp. Upstream usaba System.currentTimeMillis(), o sea
- *      reloj de pared en milisegundos, en una columna rotulada [nanosec]: con eso
- *      no se puede saber qué frame corresponde a qué posición.
- *   2. Se agrega la columna speed, que el formato objetivo necesita.
- *   3. Se escribe un solo archivo, location.csv. Upstream abría además gps.csv,
- *      que quedaba siempre vacío porque recordGpsValue() no tenía llamadores.
+ * Fixes are timestamped with Location.getElapsedRealtimeNanos(), the CLOCK_BOOTTIME base that
+ * camera frames and IMU samples also use, so all three can be aligned.
  */
 public class GPSManager {
 
@@ -35,8 +27,7 @@ public class GPSManager {
     private final LocationProvider locationProvider;
     private final SensorStreamer mStreamer;
 
-    // Protege al writer: el callback de ubicación corre en locationThread y
-    // stopRecording() puede cerrarlo desde el hilo de UI.
+    // Fixes are written from the location thread; stopRecording() runs on the UI thread.
     private final Object mWriterLock = new Object();
     private BufferedWriter mLocationWriter = null;
     private volatile boolean mRecordingGpsData = false;
@@ -44,8 +35,7 @@ public class GPSManager {
     private int mFixCount = 0;
 
     /**
-     * @param streamer receives every row written to location.csv, prefixed with "GPS,"
-     *                 (CONTEXTO_APP_ANDROID.md §4.3). May be null to only record.
+     * @param streamer receives each location.csv row prefixed with "GPS,". May be null.
      */
     public GPSManager(Activity activity, SensorStreamer streamer) {
         mStreamer = streamer;
@@ -69,7 +59,7 @@ public class GPSManager {
                 } catch (IOException ioe) {
                     Timber.e(ioe, "IOException writing a location fix");
                 }
-                // Recording and streaming coexist: a failed disk write must not stop the stream.
+                // A failed disk write should not interrupt streaming.
                 if (mStreamer != null) {
                     mStreamer.send("GPS," + row);
                 }

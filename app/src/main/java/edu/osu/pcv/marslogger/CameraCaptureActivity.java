@@ -47,8 +47,8 @@ import android.widget.Toast;
 
 import java.io.File;
 import java.lang.ref.WeakReference;
-import java.text.SimpleDateFormat;
 import java.net.InetSocketAddress;
+import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -58,6 +58,7 @@ import javax.microedition.khronos.opengles.GL10;
 
 import edu.osu.pcv.marslogger.gles.FullFrameRect;
 import edu.osu.pcv.marslogger.gles.Texture2dProgram;
+import edu.osu.pcv.marslogger.streaming.SensorStreamer;
 import timber.log.Timber;
 
 /**
@@ -455,9 +456,7 @@ public class CameraCaptureActivity extends CameraCaptureActivityBase
         Timber.d("onDestroy");
         super.onDestroy();
         mCameraHandler.invalidateHandler();     // paranoia
-        // TFG: upstream never stopped the location updates, so they kept running (now at
-        // 10 Hz) after leaving this screen. The streamer must also free UDP port 5001, or
-        // the next instance of this screen could not open it.
+        // Stop location updates and release the UDP port for the next instance of this screen.
         if (mGpsManager != null) {
             mGpsManager.unregister();
         }

@@ -1,20 +1,17 @@
 #!/usr/bin/env python3
 """
-Prueba de la Fase 2: recibe en la PC las posiciones GPS que manda la app por UDP.
+Receive the GPS fixes the app streams over UDP and print them as they arrive.
 
-Uso:
-    python3 tools/udp_gps_receiver.py <IP_del_telefono> [--port 5001]
+Usage:
+    python3 tools/udp_gps_receiver.py <phone_ip> [--port 5001]
 
-La PC saluda primero: manda "SUBSCRIBE" al teléfono cada 2 s. El teléfono
-responde "SUBSCRIBED" y, mientras está grabando, manda una línea por fix:
+Sends "SUBSCRIBE" to the phone every 2 s. The phone answers "SUBSCRIBED" and,
+while recording, sends one line per fix:
 
     GPS,<t_ns>,<lat>,<lon>,<alt>,<speed>,<unix_ns>
 
-Que el teléfono responda "SUBSCRIBED" prueba la red aunque todavía no haya
-fixes: si no responde, el problema es de conexión y no de GPS.
-
-parse_gps_line() está pensada para copiarse tal cual al pipeline
-(realtime/sources.py) cuando se implemente la fuente en vivo.
+A "SUBSCRIBED" reply with no fixes means the network works and the phone is
+either not recording or has no GPS signal.
 """
 import argparse
 import socket
@@ -23,16 +20,16 @@ from typing import NamedTuple, Optional
 
 
 class GpsFix(NamedTuple):
-    t_ns: int       # reloj monótono del teléfono: el que hay que usar para alinear con los frames
-    lat: float      # grados
-    lon: float      # grados
-    alt: float      # metros
-    speed: float    # m/s, Doppler
-    unix_ns: int    # hora de pared del fix, solo como referencia
+    t_ns: int       # phone's elapsedRealtimeNanos; use this to align with camera frames
+    lat: float      # degrees
+    lon: float      # degrees
+    alt: float      # meters
+    speed: float    # m/s
+    unix_ns: int    # wall-clock time of the fix, for reference only
 
 
 def parse_gps_line(line: str) -> Optional[GpsFix]:
-    """Convierte una línea 'GPS,...' en un GpsFix. Devuelve None si no es válida."""
+    """Parse a 'GPS,...' line. Returns None if the line is malformed."""
     parts = line.strip().split(",")
     if len(parts) != 7 or parts[0] != "GPS":
         return None
@@ -46,7 +43,7 @@ def parse_gps_line(line: str) -> Optional[GpsFix]:
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("phone_ip", help="IP del teléfono en la red local")
+    ap.add_argument("phone_ip", help="phone IP on the local network")
     ap.add_argument("--port", type=int, default=5001)
     args = ap.parse_args()
     phone = (args.phone_ip, args.port)
