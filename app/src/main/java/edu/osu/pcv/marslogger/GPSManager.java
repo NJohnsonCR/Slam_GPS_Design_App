@@ -1,7 +1,6 @@
 package edu.osu.pcv.marslogger;
 
 import android.app.Activity;
-import android.location.Location;
 
 import java.io.BufferedWriter;
 import java.io.FileWriter;
@@ -12,115 +11,105 @@ import timber.log.Timber;
 /**
  * this class is mostly similar to IMUManager because gps data must be logged at the same time
  * as the imu data (but in a separate file)
+ *
+ * TFG: reescrito para que las posiciones sean alineables con la cámara y la IMU.
+ * Ver FASE0_BUILD.md §6. Tres cambios respecto de upstream:
+ *
+ *   1. El timestamp sale de Location.getElapsedRealtimeNanos(), que es el mismo
+ *      reloj monótono (CLOCK_BOOTTIME) que usan CaptureResult.SENSOR_TIMESTAMP y
+ *      SensorEvent.timestamp. Upstream usaba System.currentTimeMillis(), o sea
+ *      reloj de pared en milisegundos, en una columna rotulada [nanosec]: con eso
+ *      no se puede saber qué frame corresponde a qué posición.
+ *   2. Se agrega la columna speed, que el formato objetivo necesita.
+ *   3. Se escribe un solo archivo, location.csv. Upstream abría además gps.csv,
+ *      que quedaba siempre vacío porque recordGpsValue() no tenía llamadores.
  */
 public class GPSManager {
 
-    public static String GpsHeader = "Timestamp[nanosec],lat[deg],lon[deg],alt[deg]," +
-            "Unix time[nanosec]\n";
+    public static String GpsHeader = "Timestamp[nanosecond],latitude[degrees]," +
+            "longitude[degrees],altitude[meters],speed[meters/second]," +
+            "Unix time[nanosecond]\n";
+
+    private static final long MILLI_TO_NANO = 1000000L;
 
     private final LocationProvider locationProvider;
-    private BufferedWriter mLatestLocationWriter = null;
-    private BufferedWriter mAllLocationsWriter = null;
+
+    // Protege al writer: el callback de ubicación corre en locationThread y
+    // stopRecording() puede cerrarlo desde el hilo de UI.
+    private final Object mWriterLock = new Object();
+    private BufferedWriter mLocationWriter = null;
     private volatile boolean mRecordingGpsData = false;
-    private volatile boolean mRecordingAllGpsData = false;
+
+    private int mFixCount = 0;
 
     public GPSManager(Activity activity) {
         locationProvider = new LocationProvider(activity, location -> {
-            if (mRecordingAllGpsData) {
+            if (!mRecordingGpsData) {
+                return;
+            }
+            synchronized (mWriterLock) {
+                if (mLocationWriter == null) {
+                    return;
+                }
                 try {
-                    Timber.d("writing location %s", location.getLatitude());
-                    Timber.d("writing location %s", location.getLongitude());
-                    Timber.d("writing location %s", location.getAltitude());
-                    mAllLocationsWriter.write(
-                            System.currentTimeMillis() + ","
+                    mLocationWriter.write(
+                            location.getElapsedRealtimeNanos() + ","
                                     + location.getLatitude() + ","
                                     + location.getLongitude() + ","
                                     + location.getAltitude() + ","
-                                    + System.currentTimeMillis() + "\n"
+                                    + location.getSpeed() + ","
+                                    + location.getTime() * MILLI_TO_NANO + "\n"
                     );
+                    ++mFixCount;
                 } catch (IOException ioe) {
-                    Timber.e(ioe);
+                    Timber.e(ioe, "IOException writing a location fix");
                 }
             }
         });
         locationProvider.createLocationListener();
     }
 
-    public void startRecording(String captureResultFile, String allGpsResultFile) {
-        try {
-            // this will only record the last known location
-            mLatestLocationWriter = new BufferedWriter(
-                    new FileWriter(captureResultFile, false));
-            if (locationProvider == null) {
-                String warning = "Unable to initialize locationProvider!\n";
-                mLatestLocationWriter.write(warning);
-            } else {
-                mLatestLocationWriter.write(GpsHeader);
+    public void startRecording(String locationResultFile) {
+        synchronized (mWriterLock) {
+            try {
+                mLocationWriter = new BufferedWriter(
+                        new FileWriter(locationResultFile, false));
+                if (locationProvider == null) {
+                    mLocationWriter.write("Unable to initialize locationProvider!\n");
+                } else {
+                    mLocationWriter.write(GpsHeader);
+                }
+                mFixCount = 0;
+                mRecordingGpsData = true;
+            } catch (IOException err) {
+                Timber.e(err, "IOException in opening gps data writer at %s",
+                        locationResultFile);
             }
-            mRecordingGpsData = true;
-        } catch (IOException err) {
-            Timber.e(err,"IOException in opening gps data writer at %s", captureResultFile);
-        }
-
-        try {
-            // this will record all the locations we have buffered
-            mAllLocationsWriter = new BufferedWriter(
-                    new FileWriter(allGpsResultFile, false));
-            if (locationProvider == null) {
-                String warning = "Unable to initialize locationProvider!\n";
-                mAllLocationsWriter.write(warning);
-            } else {
-                mAllLocationsWriter.write(GpsHeader);
-            }
-            mRecordingAllGpsData = true;
-        } catch (IOException err) {
-            Timber.e(err,"IOException in opening gps data writer at %s", allGpsResultFile);
         }
     }
 
     public void stopRecording() {
         mRecordingGpsData = false;
-        mRecordingAllGpsData = false;
-        try {
-            mLatestLocationWriter.flush();
-            mLatestLocationWriter.close();
-            mAllLocationsWriter.flush();
-            mAllLocationsWriter.close();
-        } catch (IOException err) {
-            Timber.e(err, "IOException in closing gps data writer");
+        synchronized (mWriterLock) {
+            if (mLocationWriter == null) {
+                return;
+            }
+            try {
+                mLocationWriter.flush();
+                mLocationWriter.close();
+            } catch (IOException err) {
+                Timber.e(err, "IOException in closing gps data writer");
+            }
+            Timber.d("Recorded %d location fixes", mFixCount);
+            mLocationWriter = null;
         }
-        mLatestLocationWriter = null;
-        mAllLocationsWriter = null;
     }
 
     public boolean ismRecordingGpsData() {
         return mRecordingGpsData;
     }
 
-    public boolean recordGpsValue(long syncedDataTimestamp, long unixTime) {
-        boolean gpsDataRecorded = false;
-        if (mRecordingGpsData) {
-            try {
-                Location currLocation = locationProvider.getCurrLocation();
-                if (currLocation != null) {
-                    mLatestLocationWriter.write(
-                            syncedDataTimestamp + ","
-                                    + currLocation.getLatitude() + ","
-                                    + currLocation.getLongitude() + ","
-                                    + currLocation.getAltitude() + ","
-                                    + unixTime + "\n"
-                    );
-                    gpsDataRecorded = true;
-                }
-            } catch (IOException ioe) {
-                Timber.e(ioe);
-            }
-        }
-        return gpsDataRecorded;
-    }
-
     public void unregister() {
         locationProvider.quitThread();
     }
 }
-

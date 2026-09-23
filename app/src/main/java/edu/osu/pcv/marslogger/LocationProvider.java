@@ -29,8 +29,12 @@ public class LocationProvider {
     FusedLocationProviderClient fusedLocationClient;
 
     // for handling gps updates
-    private static final int DEFAULT_UPDATE_INTERVAL = 1;
-    private static final int FAST_UPDATE_INTERVAL = 1;
+    // TFG (Fase 0.5): upstream pedía 1000 ms, y ese era el origen del "1 Hz"
+    // que se venía tomando por un límite del dispositivo. Se pide 10 Hz para
+    // medir qué entrega realmente el hardware; el proveedor fusionado puede
+    // entregar menos, y ese número es justamente el que hay que reportar.
+    private static final long DESIRED_UPDATE_INTERVAL_MS = 100;
+    private static final long FASTEST_UPDATE_INTERVAL_MS = 100;
 
     // to consume locations other than the latest one
     private final Consumer<Location> consumer;
@@ -51,8 +55,8 @@ public class LocationProvider {
         locationThread = new HandlerThread("locationThread");
         locationThread.start();
         LocationRequest locationRequest = LocationRequest.create();
-        locationRequest.setInterval(1000 * DEFAULT_UPDATE_INTERVAL);
-        locationRequest.setFastestInterval(1000 * FAST_UPDATE_INTERVAL);
+        locationRequest.setInterval(DESIRED_UPDATE_INTERVAL_MS);
+        locationRequest.setFastestInterval(FASTEST_UPDATE_INTERVAL_MS);
         locationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
 
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(context);

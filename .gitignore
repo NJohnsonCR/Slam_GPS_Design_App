@@ -174,3 +174,6 @@ Thumbs.db
 .idea
 .navigation
 output.json 
+
+### Notas de trabajo del TFG (no son parte del código fuente) ###
+FASE0_BUILD.md
