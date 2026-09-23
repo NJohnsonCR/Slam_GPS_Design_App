@@ -1,11 +1,19 @@
 package edu.osu.pcv.marslogger;
 
+import android.os.SystemClock;
+
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
+import java.net.Inet4Address;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.NetworkInterface;
 import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicLong;
@@ -31,6 +39,8 @@ public class SensorStreamer {
     private static final String SUBSCRIBE = "SUBSCRIBE";
     private static final byte[] SUBSCRIBED = "SUBSCRIBED".getBytes(StandardCharsets.UTF_8);
     private static final int QUEUE_CAPACITY = 256;
+    // The PC re-sends SUBSCRIBE every 2 s. Without one for this long, it is shown as silent.
+    private static final long SUBSCRIBER_TIMEOUT_MS = 5000;
 
     private final int mPort;
     private final BlockingQueue<String> mQueue = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
@@ -39,6 +49,7 @@ public class SensorStreamer {
 
     private volatile DatagramSocket mSocket;
     private volatile InetSocketAddress mSubscriber;
+    private volatile long mLastSubscribeMs;
     private volatile boolean mRunning;
     private Thread mListenThread;
     private Thread mSendThread;
@@ -88,6 +99,58 @@ public class SensorStreamer {
         Timber.i("Sensor streamer stopped: %d sent, %d dropped", mSent.get(), mDropped.get());
     }
 
+    /** False if the UDP port could not be opened, or after stop(). */
+    public boolean isRunning() {
+        return mRunning;
+    }
+
+    /** The PC that last sent SUBSCRIBE, or null if none has yet. */
+    public InetSocketAddress getSubscriber() {
+        return mSubscriber;
+    }
+
+    /** True if the subscriber has greeted recently enough to be considered listening. */
+    public boolean isSubscriberAlive() {
+        return mSubscriber != null && getMillisSinceLastSubscribe() < SUBSCRIBER_TIMEOUT_MS;
+    }
+
+    public long getMillisSinceLastSubscribe() {
+        return SystemClock.elapsedRealtime() - mLastSubscribeMs;
+    }
+
+    public long getSentCount() {
+        return mSent.get();
+    }
+
+    public long getDroppedCount() {
+        return mDropped.get();
+    }
+
+    /**
+     * IPv4 addresses the PC can use to reach this phone: WiFi, the phone's own hotspot, or
+     * USB tethering. Cellular interfaces are skipped because the PC cannot reach them.
+     */
+    public static List<String> localIpv4Addresses() {
+        List<String> addresses = new ArrayList<>();
+        try {
+            for (NetworkInterface nif : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                String name = nif.getName();
+                if (!nif.isUp() || nif.isLoopback()
+                        || name.startsWith("rmnet") || name.startsWith("ccmni")) {
+                    continue;
+                }
+                for (InetAddress address : Collections.list(nif.getInetAddresses())) {
+                    if (address instanceof Inet4Address && address.isSiteLocalAddress()) {
+                        addresses.add(address.getHostAddress());
+                    }
+                }
+            }
+        } catch (SocketException e) {
+            Timber.w(e, "Could not list network interfaces");
+        }
+        return addresses;
+    }
+
     private void listenLoop() {
         byte[] buffer = new byte[64];
         while (mRunning) {
@@ -110,6 +173,7 @@ public class SensorStreamer {
                 Timber.i("New sensor subscriber: %s", from);
             }
             mSubscriber = from;
+            mLastSubscribeMs = SystemClock.elapsedRealtime();
             try {
                 mSocket.send(new DatagramPacket(SUBSCRIBED, SUBSCRIBED.length, from));
             } catch (IOException e) {

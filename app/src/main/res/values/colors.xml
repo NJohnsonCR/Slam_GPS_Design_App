@@ -3,4 +3,7 @@
     <color name="colorPrimary">#3F51B5</color>
     <color name="colorPrimaryDark">#303F9F</color>
     <color name="colorAccent">#FF4081</color>
+    <!-- TFG: legible status text over the camera preview -->
+    <color name="overlayBackground">#99000000</color>
+    <color name="overlayText">#FFFFFFFF</color>
 </resources>

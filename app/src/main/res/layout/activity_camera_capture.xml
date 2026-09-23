@@ -45,4 +45,18 @@
 
     <include layout="@layout/content_preview"/>
 
+    <!-- TFG: phone IP and UDP streaming state, updated every second.
+         Here and not in content_preview, which the photo screen shares. -->
+    <TextView
+        android:id="@+id/streamStatus_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignStart="@id/cameraParams_text"
+        android:layout_below="@id/numSnapshotLabel"
+        android:layout_marginTop="4dp"
+        android:background="@color/overlayBackground"
+        android:padding="6dp"
+        android:textColor="@color/overlayText"
+        android:text="@string/streamStatus_text" />
+
 </RelativeLayout>

@@ -27,6 +27,8 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
+import android.os.Looper;
+import android.text.TextUtils;
 import android.os.Message;
 
 import androidx.annotation.RequiresApi;
@@ -46,7 +48,9 @@ import android.widget.Toast;
 import java.io.File;
 import java.lang.ref.WeakReference;
 import java.text.SimpleDateFormat;
+import java.net.InetSocketAddress;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 
 import javax.microedition.khronos.egl.EGLConfig;
@@ -290,6 +294,15 @@ public class CameraCaptureActivity extends CameraCaptureActivityBase
     private IMUManager mImuManager;
     private GPSManager mGpsManager;
     private SensorStreamer mSensorStreamer;
+    private TextView mStreamStatusText;
+    private final Handler mStatusHandler = new Handler(Looper.getMainLooper());
+    private final Runnable mStatusUpdater = new Runnable() {
+        @Override
+        public void run() {
+            updateStreamStatus();
+            mStatusHandler.postDelayed(this, 1000);
+        }
+    };
     private TimeBaseManager mTimeBaseManager;
 
     @Override
@@ -357,6 +370,7 @@ public class CameraCaptureActivity extends CameraCaptureActivityBase
         mKeyCameraParamsText = (TextView) findViewById(R.id.cameraParams_text);
         mCaptureResultText = (TextView) findViewById(R.id.captureResult_text);
         mOutputDirText = (TextView) findViewById(R.id.cameraOutputDir_text);
+        mStreamStatusText = (TextView) findViewById(R.id.streamStatus_text);
     }
 
     @Override
@@ -385,6 +399,7 @@ public class CameraCaptureActivity extends CameraCaptureActivityBase
             }
         });
         mImuManager.register();
+        mStatusHandler.post(mStatusUpdater);
     }
 
     @Override
@@ -406,7 +421,33 @@ public class CameraCaptureActivity extends CameraCaptureActivityBase
         });
         mGLView.onPause();
         mImuManager.unregister();
+        mStatusHandler.removeCallbacks(mStatusUpdater);
         Timber.d("onPause complete");
+    }
+
+    /** Shows the phone's IP, whether a PC is listening, and how many lines were sent. */
+    private void updateStreamStatus() {
+        if (mSensorStreamer == null || !mSensorStreamer.isRunning()) {
+            mStreamStatusText.setText("UDP port " + SensorStreamer.DEFAULT_PORT + " unavailable");
+            return;
+        }
+        List<String> ips = SensorStreamer.localIpv4Addresses();
+        String phone = ips.isEmpty() ? "no network" : TextUtils.join(", ", ips);
+
+        InetSocketAddress pc = mSensorStreamer.getSubscriber();
+        String pcState;
+        if (pc == null) {
+            pcState = "waiting for PC";
+        } else if (mSensorStreamer.isSubscriberAlive()) {
+            pcState = "connected " + pc.getAddress().getHostAddress();
+        } else {
+            pcState = "silent for " + mSensorStreamer.getMillisSinceLastSubscribe() / 1000 + " s";
+        }
+
+        mStreamStatusText.setText(String.format(Locale.US,
+                "Phone IP: %s (UDP %d)\nPC: %s\nSent: %d  dropped: %d",
+                phone, SensorStreamer.DEFAULT_PORT, pcState,
+                mSensorStreamer.getSentCount(), mSensorStreamer.getDroppedCount()));
     }
 
     @Override
