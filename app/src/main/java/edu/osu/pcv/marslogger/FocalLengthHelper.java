@@ -58,6 +58,11 @@ public class FocalLengthHelper {
      * First it tries to use values read from LENS_INTRINSIC_CALIBRATION, if not available,
      * it will compute focal length based on an empirical model.
      *
+     * Both branches are expressed in sensor pixels and must be scaled to the output
+     * image (mImageSize) with imageScale(). LENS_INTRINSIC_CALIBRATION is defined in
+     * the pre-correction active array coordinate system (e.g. 4080x3060), not in the
+     * output image (e.g. 1280x720).
+     *
      * focus distance is the inverse of the distance between the lens and the subject,
      * assuming LENS_INFO_FOCUS_DISTANCE_CALIBRATION is APPROXIMATE or CALIBRATED.
      * see https://stackoverflow.com/questions/60394282/unit-of-camera2-lens-focus-distance
@@ -74,8 +79,10 @@ public class FocalLengthHelper {
      */
     public SizeF getFocalLengthPixel() {
         if (mIntrinsic != null && mIntrinsic[0] > 1.0) {
-//            Timber.d("Focal length set as (%f, %f)",mIntrinsic[0], mIntrinsic[1]);
-            return new SizeF(mIntrinsic[0], mIntrinsic[1]);
+            // TFG: upstream returned mIntrinsic unscaled, i.e. in active array pixels.
+            // On a Galaxy S23 that wrote fx = 2766 for a 1280x720 video instead of ~868.
+            float scale = imageScale();
+            return new SizeF(scale * mIntrinsic[0], scale * mIntrinsic[1]);
         }
 
         if (mFocalLength != null) {
@@ -86,23 +93,42 @@ public class FocalLengthHelper {
                 imageDistance = 1000.f / (1000.f / mFocalLength - mFocusDistance);
             }
             // ignore the effect of distortion on the active array coordinates
-            Float crop_aspect = (float) mCropRegion.width() /
-                    ((float) mCropRegion.height());
-            Float image_aspect = (float) mImageSize.getWidth() /
-                    ((float) mImageSize.getHeight());
+            float scale = imageScale();
             Float f_image_pixel;
-            if (image_aspect >= crop_aspect) {
-                Float scale = (float) mImageSize.getWidth() / ((float) mCropRegion.width());
+            if (isWidthLimited()) {
                 f_image_pixel = scale * imageDistance * mPixelArraySize.getWidth() /
                         mPhysicalSize.getWidth();
             } else {
-                Float scale = (float) mImageSize.getHeight() / ((float) mCropRegion.height());
                 f_image_pixel = scale * imageDistance * mPixelArraySize.getHeight() /
                         mPhysicalSize.getHeight();
             }
             return new SizeF(f_image_pixel, f_image_pixel);
         }
         return new SizeF(1.0f, 1.0f);
+    }
+
+    /**
+     * The output image fills the crop region along one axis and is cropped along the
+     * other. True when the image is wider than the crop region, so its width spans the
+     * full crop width.
+     */
+    private boolean isWidthLimited() {
+        float cropAspect = (float) mCropRegion.width() / mCropRegion.height();
+        float imageAspect = (float) mImageSize.getWidth() / mImageSize.getHeight();
+        return imageAspect >= cropAspect;
+    }
+
+    /**
+     * Factor that converts active array pixels to output image pixels.
+     * Assumes CONTROL_ZOOM_RATIO is 1.0, which holds because setZoomRatio() is never
+     * called; with a different zoom ratio the crop region would be relative to the
+     * zoomed field of view and this factor would need to account for it.
+     */
+    private float imageScale() {
+        if (isWidthLimited()) {
+            return (float) mImageSize.getWidth() / mCropRegion.width();
+        }
+        return (float) mImageSize.getHeight() / mCropRegion.height();
     }
 
     @TargetApi(23)
