@@ -33,6 +33,7 @@ public class GPSManager {
     private static final long MILLI_TO_NANO = 1000000L;
 
     private final LocationProvider locationProvider;
+    private final SensorStreamer mStreamer;
 
     // Protege al writer: el callback de ubicación corre en locationThread y
     // stopRecording() puede cerrarlo desde el hilo de UI.
@@ -42,7 +43,12 @@ public class GPSManager {
 
     private int mFixCount = 0;
 
-    public GPSManager(Activity activity) {
+    /**
+     * @param streamer receives every row written to location.csv, prefixed with "GPS,"
+     *                 (CONTEXTO_APP_ANDROID.md §4.3). May be null to only record.
+     */
+    public GPSManager(Activity activity, SensorStreamer streamer) {
+        mStreamer = streamer;
         locationProvider = new LocationProvider(activity, location -> {
             if (!mRecordingGpsData) {
                 return;
@@ -51,18 +57,21 @@ public class GPSManager {
                 if (mLocationWriter == null) {
                     return;
                 }
+                String row = location.getElapsedRealtimeNanos() + ","
+                        + location.getLatitude() + ","
+                        + location.getLongitude() + ","
+                        + location.getAltitude() + ","
+                        + location.getSpeed() + ","
+                        + location.getTime() * MILLI_TO_NANO;
                 try {
-                    mLocationWriter.write(
-                            location.getElapsedRealtimeNanos() + ","
-                                    + location.getLatitude() + ","
-                                    + location.getLongitude() + ","
-                                    + location.getAltitude() + ","
-                                    + location.getSpeed() + ","
-                                    + location.getTime() * MILLI_TO_NANO + "\n"
-                    );
+                    mLocationWriter.write(row + "\n");
                     ++mFixCount;
                 } catch (IOException ioe) {
                     Timber.e(ioe, "IOException writing a location fix");
+                }
+                // Recording and streaming coexist: a failed disk write must not stop the stream.
+                if (mStreamer != null) {
+                    mStreamer.send("GPS," + row);
                 }
             }
         });

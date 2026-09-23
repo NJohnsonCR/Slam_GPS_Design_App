@@ -289,6 +289,7 @@ public class CameraCaptureActivity extends CameraCaptureActivityBase
 
     private IMUManager mImuManager;
     private GPSManager mGpsManager;
+    private SensorStreamer mSensorStreamer;
     private TimeBaseManager mTimeBaseManager;
 
     @Override
@@ -342,8 +343,12 @@ public class CameraCaptureActivity extends CameraCaptureActivityBase
             mCameraHandler.sendMessage(
                     mCameraHandler.obtainMessage(CameraHandler.MSG_MANUAL_FOCUS, focusConfig));
         });
+        if (mSensorStreamer == null) {
+            mSensorStreamer = new SensorStreamer(SensorStreamer.DEFAULT_PORT);
+            mSensorStreamer.start();
+        }
         if (mGpsManager == null) {
-            mGpsManager = new GPSManager(this);
+            mGpsManager = new GPSManager(this, mSensorStreamer);
         }
         if (mImuManager == null) {
             mImuManager = new IMUManager(this);
@@ -409,6 +414,15 @@ public class CameraCaptureActivity extends CameraCaptureActivityBase
         Timber.d("onDestroy");
         super.onDestroy();
         mCameraHandler.invalidateHandler();     // paranoia
+        // TFG: upstream never stopped the location updates, so they kept running (now at
+        // 10 Hz) after leaving this screen. The streamer must also free UDP port 5001, or
+        // the next instance of this screen could not open it.
+        if (mGpsManager != null) {
+            mGpsManager.unregister();
+        }
+        if (mSensorStreamer != null) {
+            mSensorStreamer.stop();
+        }
     }
 
     // spinner selected
