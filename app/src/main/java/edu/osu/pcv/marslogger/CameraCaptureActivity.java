@@ -294,6 +294,9 @@ public class CameraCaptureActivity extends CameraCaptureActivityBase
 
     private CameraHandler mCameraHandler;
     private boolean mRecordingEnabled;      // controls button state
+    private String mRecordingFolder = "";
+    // Commands from the PC are ignored while the camera is released.
+    private boolean mResumed;
 
     private IMUManager mImuManager;
     private GPSManager mGpsManager;
@@ -367,6 +370,8 @@ public class CameraCaptureActivity extends CameraCaptureActivityBase
         });
         if (mSensorStreamer == null) {
             mSensorStreamer = new SensorStreamer(SensorStreamer.DEFAULT_PORT);
+            mSensorStreamer.setCommandListener(
+                    command -> runOnUiThread(() -> onRemoteCommand(command)));
             mSensorStreamer.start();
         }
         if (mVideoStreamer == null) {
@@ -415,12 +420,14 @@ public class CameraCaptureActivity extends CameraCaptureActivityBase
         });
         mImuManager.register();
         mStatusHandler.post(mStatusUpdater);
+        mResumed = true;
     }
 
     @Override
     protected void onPause() {
         Timber.d("onPause -- releasing camera");
         super.onPause();
+        mResumed = false;
         // no more frame metadata will be saved during pause
         if (mCamera2Proxy != null) {
             mCamera2Proxy.releaseCamera();
@@ -534,6 +541,7 @@ public class CameraCaptureActivity extends CameraCaptureActivityBase
             String metaFile = outputDir + File.separator + "frame_timestamps.txt";
             String basename = outputDir.substring(outputDir.lastIndexOf("/")+1);
             mOutputDirText.setText(basename);
+            mRecordingFolder = basename;
             mRenderer.resetOutputFiles(outputFile, metaFile); // this will not cause sync issues
             String inertialFile = outputDir + File.separator + "gyro_accel.csv";
             String locationFile = outputDir + File.separator + "location.csv";
@@ -557,6 +565,25 @@ public class CameraCaptureActivity extends CameraCaptureActivityBase
             }
         });
         updateControls();
+        publishRecordingState();
+    }
+
+    /** START and STOP from the PC act like the record button. */
+    private void onRemoteCommand(String command) {
+        boolean start = SensorStreamer.START.equals(command);
+        if (mResumed && start != mRecordingEnabled) {
+            clickToggleRecording(null);
+            Toast.makeText(this, start ? "Recording started by PC" : "Recording stopped by PC",
+                    Toast.LENGTH_SHORT).show();
+        } else {
+            publishRecordingState();    // nothing to do, but the PC still expects an answer
+        }
+    }
+
+    private void publishRecordingState() {
+        if (mSensorStreamer != null) {
+            mSensorStreamer.setRecordingState(mRecordingEnabled, mRecordingFolder);
+        }
     }
 
     /**

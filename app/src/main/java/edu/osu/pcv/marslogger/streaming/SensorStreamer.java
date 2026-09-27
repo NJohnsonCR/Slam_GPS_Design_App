@@ -21,30 +21,44 @@ import java.util.concurrent.atomic.AtomicLong;
 import timber.log.Timber;
 
 /**
- * Streams sensor measurements to a PC over UDP, one CSV row per datagram.
+ * Streams sensor measurements to a PC over UDP, one CSV row per datagram, and takes
+ * recording commands from it.
  *
  * The PC subscribes by sending "SUBSCRIBE" to this port and repeating it every few seconds;
- * the phone replies "SUBSCRIBED" and streams to the latest subscriber. send() never blocks:
- * rows are queued for a sender thread and dropped if the queue is full.
+ * the phone replies "SUBSCRIBED" and its state, and streams to the latest subscriber.
+ * "START" and "STOP" start and stop recording; the phone answers each with its state,
+ * "STATE,RECORDING,folder" or "STATE,IDLE", and also sends it when recording is started or
+ * stopped on the phone. send() never blocks: datagrams are queued for a sender thread and
+ * dropped if the queue is full.
  */
 public class SensorStreamer {
 
     public static final int DEFAULT_PORT = 5001;
+    public static final String START = "START";
+    public static final String STOP = "STOP";
+
+    /** Receives START and STOP on the streamer's thread. Must end with setRecordingState(). */
+    public interface CommandListener {
+        void onCommand(String command);
+    }
 
     private static final String SUBSCRIBE = "SUBSCRIBE";
-    private static final byte[] SUBSCRIBED = "SUBSCRIBED".getBytes(StandardCharsets.UTF_8);
+    private static final String SUBSCRIBED = "SUBSCRIBED";
     private static final int QUEUE_CAPACITY = 256;
     // A subscriber that has not sent SUBSCRIBE for this long is reported as silent.
     private static final long SUBSCRIBER_TIMEOUT_MS = 5000;
 
     private final int mPort;
-    private final BlockingQueue<String> mQueue = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
+    private final BlockingQueue<DatagramPacket> mQueue = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
     private final AtomicLong mSent = new AtomicLong();
     private final AtomicLong mDropped = new AtomicLong();
 
     private volatile DatagramSocket mSocket;
     private volatile InetSocketAddress mSubscriber;
+    private volatile InetSocketAddress mCommander;
     private volatile long mLastSubscribeMs;
+    private volatile String mState = "STATE,IDLE";
+    private volatile CommandListener mCommandListener;
     private volatile boolean mRunning;
     private Thread mListenThread;
     private Thread mSendThread;
@@ -73,11 +87,36 @@ public class SensorStreamer {
 
     /** Queues one line for the current subscriber. Never blocks. */
     public void send(String line) {
-        if (!mRunning || mSubscriber == null) {
+        InetSocketAddress to = mSubscriber;
+        if (!mRunning || to == null) {
             return;     // no subscriber yet
         }
-        if (!mQueue.offer(line)) {
-            mDropped.incrementAndGet();
+        enqueue(line, to);
+    }
+
+    public void setCommandListener(CommandListener listener) {
+        mCommandListener = listener;
+    }
+
+    /**
+     * Sets the state reported to the PC and sends it to the subscriber and to whoever sent
+     * the last command.
+     *
+     * @param folder name of the recording's folder; may be empty if unknown
+     */
+    public void setRecordingState(boolean recording, String folder) {
+        String state = recording ? "STATE,RECORDING," + folder : "STATE,IDLE";
+        mState = state;
+        if (!mRunning) {
+            return;
+        }
+        InetSocketAddress subscriber = mSubscriber;
+        InetSocketAddress commander = mCommander;
+        if (subscriber != null) {
+            enqueue(state, subscriber);
+        }
+        if (commander != null && !commander.equals(subscriber)) {
+            enqueue(state, commander);
         }
     }
 
@@ -146,6 +185,13 @@ public class SensorStreamer {
         return addresses;
     }
 
+    private void enqueue(String text, InetSocketAddress to) {
+        byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
+        if (!mQueue.offer(new DatagramPacket(bytes, bytes.length, to))) {
+            mDropped.incrementAndGet();
+        }
+    }
+
     private void listenLoop() {
         byte[] buffer = new byte[64];
         while (mRunning) {
@@ -160,42 +206,51 @@ public class SensorStreamer {
             }
             String message = new String(packet.getData(), 0, packet.getLength(),
                     StandardCharsets.UTF_8).trim();
-            if (!SUBSCRIBE.equals(message)) {
-                continue;
-            }
             InetSocketAddress from = (InetSocketAddress) packet.getSocketAddress();
-            if (!from.equals(mSubscriber)) {
-                Timber.i("New sensor subscriber: %s", from);
+            if (SUBSCRIBE.equals(message)) {
+                if (!from.equals(mSubscriber)) {
+                    Timber.i("New sensor subscriber: %s", from);
+                }
+                mSubscriber = from;
+                mLastSubscribeMs = SystemClock.elapsedRealtime();
+                reply(SUBSCRIBED, from);
+                reply(mState, from);
+            } else if (START.equals(message) || STOP.equals(message)) {
+                Timber.i("%s from %s", message, from);
+                mCommander = from;
+                CommandListener listener = mCommandListener;
+                if (listener != null) {
+                    listener.onCommand(message);
+                } else {
+                    reply(mState, from);
+                }
             }
-            mSubscriber = from;
-            mLastSubscribeMs = SystemClock.elapsedRealtime();
-            try {
-                mSocket.send(new DatagramPacket(SUBSCRIBED, SUBSCRIBED.length, from));
-            } catch (IOException e) {
-                Timber.w(e, "Could not acknowledge subscriber %s", from);
-            }
+        }
+    }
+
+    private void reply(String text, InetSocketAddress to) {
+        byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
+        try {
+            mSocket.send(new DatagramPacket(bytes, bytes.length, to));
+        } catch (IOException e) {
+            Timber.w(e, "Could not reply to %s", to);
         }
     }
 
     private void sendLoop() {
         while (mRunning) {
-            String line;
+            DatagramPacket packet;
             try {
-                line = mQueue.take();
+                packet = mQueue.take();
             } catch (InterruptedException e) {
                 return;
             }
-            InetSocketAddress to = mSubscriber;
-            if (to == null) {
-                continue;
-            }
-            byte[] bytes = line.getBytes(StandardCharsets.UTF_8);
             try {
-                mSocket.send(new DatagramPacket(bytes, bytes.length, to));
+                mSocket.send(packet);
                 mSent.incrementAndGet();
             } catch (IOException e) {
                 mDropped.incrementAndGet();
-                Timber.w(e, "Could not send sensor datagram to %s", to);
+                Timber.w(e, "Could not send datagram to %s", packet.getSocketAddress());
             }
         }
     }
