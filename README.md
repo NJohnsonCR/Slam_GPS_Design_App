@@ -1,6 +1,6 @@
 # Slam_GPS_Design_App
 
-Aplicación Android que graba video, IMU y GPS con marcas de tiempo en un mismo reloj, y transmite las mediciones en vivo a una PC por la red local. Es la fuente de datos del sistema de SLAM visual con GPS del repositorio `Slam_GPS_Design`.
+Aplicación Android que graba video, IMU y GPS con marcas de tiempo en un mismo reloj, y transmite el video y las mediciones en vivo a una PC por la red local. Es la fuente de datos del sistema de SLAM visual con GPS del repositorio `Slam_GPS_Design`.
 
 Está basada en [MARS Logger](https://github.com/OSUPCVLab/marslogger_android), del PCV Lab de Ohio State University, cuya historia está integrada en este repositorio.
 
@@ -46,19 +46,55 @@ adb pull /sdcard/Android/data/edu.osu.pcv.marslogger/files/data/<carpeta>
 
 Cuando `edge_epochs.txt` indica `SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME` (es el caso del Galaxy S23), la primera columna de todos los archivos está en el mismo reloj, el de `SystemClock.elapsedRealtimeNanos()`. Las filas de cámara, IMU y GPS se alinean directamente por esa columna.
 
-La columna `Unix time` sirve como referencia horaria pero no para alinear: en el Galaxy S23, la de los frames queda entre 60 y 75 ms desfasada respecto de la de la IMU y el GPS.
+La columna `Unix time` sirve como referencia horaria pero no para alinear. En los archivos de cámara es la hora en que el frame llegó a la app, no la de captura: en el Galaxy S23 queda entre 60 y 75 ms desfasada respecto de la de la IMU y el GPS.
 
 ## Transmisión en vivo
 
-Mientras graba, la app envía cada fila de `location.csv` por UDP al puerto 5001:
+El teléfono y la PC tienen que estar en la misma red, por ejemplo con el teléfono como punto de acceso. El teléfono espera las conexiones y la PC se conecta a él. La pantalla de video muestra la IP del teléfono y, para cada transmisión, la PC conectada, lo enviado y lo descartado.
+
+### Video (TCP, puerto 5000)
+
+Mientras la pantalla de video está abierta, grabando o no, la app envía cada frame como JPEG a la PC conectada. Al conectarse, la PC recibe primero una línea con los parámetros de la cámara, en píxeles de la imagen transmitida:
+
+```
+HELLO,<ancho>,<alto>,<fx>,<fy>,<cx>,<cy>,<fps>
+```
+
+Después, por cada frame, un encabezado de 20 bytes seguido del JPEG:
+
+| Campo | Bytes | Tipo |
+|---|---|---|
+| Longitud del JPEG | 4 | entero sin signo, big-endian |
+| Instante de captura, reloj de `elapsedRealtimeNanos()` (ns) | 8 | entero sin signo, big-endian |
+| Instante de captura, hora Unix (ns) | 8 | entero sin signo, big-endian |
+
+- Los frames no se encolan: si llega uno nuevo mientras el anterior se sigue enviando, el nuevo se descarta. Una red lenta baja la tasa de frames pero no aumenta el retraso.
+- Se atiende a una PC a la vez; una conexión nueva reemplaza a la anterior.
+- La imagen tiene el tamaño del video y la orientación del sensor. Queda derecha con el teléfono en horizontal y la cámara a la izquierda.
+- El teléfono no corrige la distorsión del lente, y el `HELLO` no la incluye. En el Galaxy S23, `LENS_DISTORTION` es `[0.0903, -0.1210, 0.0544, 0, 0]` en el orden de Android (k1, k2, k3, p1, p2).
+
+Para ver el video desde la PC (requiere OpenCV):
+
+```bash
+python tools/video_receiver.py <IP_del_teléfono>
+```
+
+Por cable USB, sin WiFi:
+
+```bash
+adb forward tcp:5000 tcp:5000
+python tools/video_receiver.py 127.0.0.1
+```
+
+### GPS (UDP, puerto 5001)
+
+Mientras graba, la app envía cada fila de `location.csv`:
 
 ```
 GPS,<t_ns>,<lat>,<lon>,<alt>,<speed>,<unix_ns>
 ```
 
 La PC inicia la conexión enviando el texto `SUBSCRIBE` al puerto 5001 del teléfono, y lo repite cada 2 segundos. El teléfono responde `SUBSCRIBED` y envía las mediciones a la última dirección suscrita. Si pasan 5 segundos sin recibir `SUBSCRIBE`, la pantalla muestra a la PC como inactiva.
-
-El teléfono y la PC tienen que estar en la misma red, por ejemplo con el teléfono como punto de acceso. La pantalla de video muestra la IP del teléfono, el estado de la conexión y cuántas líneas se enviaron y descartaron.
 
 Para probar la recepción desde la PC:
 
@@ -71,7 +107,8 @@ python3 tools/udp_gps_receiver.py <IP_del_teléfono>
 - `location.csv` reemplaza a `gps.csv` y `all_gps.csv`. Las posiciones usan el reloj de la cámara y la IMU en lugar de la hora del sistema en milisegundos, e incluyen la velocidad.
 - Se solicitan actualizaciones de ubicación cada 100 ms en lugar de cada 1000 ms.
 - `fx` y `fy` en `movie_metadata.csv` se escalan a la resolución del video cuando el teléfono expone su calibración de fábrica. Antes se escribían en píxeles del sensor.
-- Transmisión de las posiciones por UDP y estado de la conexión en la pantalla de video.
+- Transmisión del video por TCP y de las posiciones por UDP, con el estado de cada conexión en la pantalla de video.
+- Cálculo del punto principal (`cx`, `cy`) a partir de la calibración de fábrica, para el `HELLO`.
 - Las actualizaciones de ubicación se detienen al salir de la pantalla de video.
 
 ## Estructura

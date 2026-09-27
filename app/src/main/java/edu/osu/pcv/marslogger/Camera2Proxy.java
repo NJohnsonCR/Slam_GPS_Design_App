@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.ImageFormat;
+import android.graphics.PointF;
 import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
@@ -43,12 +44,13 @@ import java.io.BufferedWriter;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.util.ArrayList;
-
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import edu.osu.pcv.marslogger.streaming.VideoStreamer;
 import timber.log.Timber;
 
 public class Camera2Proxy {
@@ -123,6 +125,10 @@ public class Camera2Proxy {
 
     private FocalLengthHelper mFocalLengthHelper = new FocalLengthHelper();
 
+    private VideoStreamer mVideoStreamer;
+    private ImageReader mStreamReader;
+    private boolean mStreamSizeSupported = false;
+
     public boolean mSupportSnapshot = false; // Previewing both video frames and image frames slows down video frame rate.
 
     private CameraDevice.StateCallback mStateCallback = new CameraDevice.StateCallback() {
@@ -152,6 +158,11 @@ public class Camera2Proxy {
 
     public Size getmVideoSize() {
         return mVideoSize;
+    }
+
+    /** Sends every frame to this streamer as well. Must be set before openCamera(). */
+    public void setVideoStreamer(VideoStreamer streamer) {
+        mVideoStreamer = streamer;
     }
 
     public void startRecordingCaptureResult(String captureResultFile) {
@@ -328,6 +339,9 @@ public class Camera2Proxy {
             Size[] videoSizeChoices = map.getOutputSizes(MediaRecorder.class);
             mVideoSize = CameraUtils.chooseVideoSize(videoSizeChoices, width, height, width);
 
+            mStreamSizeSupported = Arrays.asList(map.getOutputSizes(ImageFormat.YUV_420_888))
+                    .contains(mVideoSize);
+
             mFocalLengthHelper.setLensParams(mCameraCharacteristics);
             mFocalLengthHelper.setmImageSize(mVideoSize);
 
@@ -352,6 +366,8 @@ public class Camera2Proxy {
         }
         if (supportSnapshot)
             initImageReader();
+        if (mVideoStreamer != null)
+            initStreamReader();
         mSupportSnapshot = supportSnapshot;
         try {
             mCameraManager.openCamera(mCameraIdStr, mStateCallback, mBackgroundHandler);
@@ -379,6 +395,11 @@ public class Camera2Proxy {
         mCameraIdStr = "";
         stopRecordingCaptureResult();
         stopBackgroundThread();
+        // Closed only now, so that no frame is still being read on the background thread.
+        if (mStreamReader != null) {
+            mStreamReader.close();
+            mStreamReader = null;
+        }
     }
 
     public void setPreviewSurface(SurfaceHolder holder) {
@@ -404,6 +425,20 @@ public class Camera2Proxy {
 
         Timber.d("Image reader size w: %d, h: %d",mImageReader.getWidth(),
                 mImageReader.getHeight());
+    }
+
+    /**
+     * A YUV copy of each frame for the video streamer. It has the video size, so the
+     * intrinsics computed for the video also apply to the streamed images.
+     */
+    private void initStreamReader() {
+        if (!mStreamSizeSupported) {
+            Timber.w("YUV output not available at %s; video streaming disabled", mVideoSize);
+            return;
+        }
+        mStreamReader = ImageReader.newInstance(mVideoSize.getWidth(), mVideoSize.getHeight(),
+                ImageFormat.YUV_420_888, 3);
+        mStreamReader.setOnImageAvailableListener(mVideoStreamer, mBackgroundHandler);
     }
 
     private class NumExpoIso {
@@ -527,6 +562,11 @@ public class Camera2Proxy {
                 Surface readerSurface = mImageReader.getSurface();
                 surfaces.add(readerSurface);
                 mPreviewRequestBuilder.addTarget(readerSurface);
+            }
+            if (mStreamReader != null) {
+                Surface streamSurface = mStreamReader.getSurface();
+                surfaces.add(streamSurface);
+                mPreviewRequestBuilder.addTarget(streamSurface);
             }
 
             if (mPreviewSurfaceTexture != null && mPreviewSurface == null) { // use texture view
@@ -729,6 +769,14 @@ public class Camera2Proxy {
                 } catch (IOException err) {
                     Timber.e(err, "Error writing captureResult");
                 }
+            }
+            if (mVideoStreamer != null) {
+                PointF center = mFocalLengthHelper.getPrincipalPoint();
+                Range<Integer> fpsRange = result.get(CaptureResult.CONTROL_AE_TARGET_FPS_RANGE);
+                int fps = fpsRange != null ? fpsRange.getUpper() : VideoEncoderCore.FRAME_RATE;
+                mVideoStreamer.setCameraInfo(mVideoSize.getWidth(), mVideoSize.getHeight(),
+                        sz_focal_length.getWidth(), sz_focal_length.getHeight(),
+                        center.x, center.y, fps);
             }
             ((CameraCaptureActivityBase) mActivity).updateCaptureResultPanel(
                     sz_focal_length.getWidth(), exposureTimeNs, afMode);

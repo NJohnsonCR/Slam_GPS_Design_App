@@ -28,6 +28,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.text.TextUtils;
 import android.os.Message;
 
@@ -47,6 +48,7 @@ import android.widget.Toast;
 
 import java.io.File;
 import java.lang.ref.WeakReference;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -59,6 +61,7 @@ import javax.microedition.khronos.opengles.GL10;
 import edu.osu.pcv.marslogger.gles.FullFrameRect;
 import edu.osu.pcv.marslogger.gles.Texture2dProgram;
 import edu.osu.pcv.marslogger.streaming.SensorStreamer;
+import edu.osu.pcv.marslogger.streaming.VideoStreamer;
 import timber.log.Timber;
 
 /**
@@ -295,7 +298,12 @@ public class CameraCaptureActivity extends CameraCaptureActivityBase
     private IMUManager mImuManager;
     private GPSManager mGpsManager;
     private SensorStreamer mSensorStreamer;
+    private VideoStreamer mVideoStreamer;
     private TextView mStreamStatusText;
+    // Previous video counters, to turn totals into a rate per status update.
+    private long mLastStatusMs;
+    private long mLastVideoFrames;
+    private long mLastVideoBytes;
     private final Handler mStatusHandler = new Handler(Looper.getMainLooper());
     private final Runnable mStatusUpdater = new Runnable() {
         @Override
@@ -361,6 +369,11 @@ public class CameraCaptureActivity extends CameraCaptureActivityBase
             mSensorStreamer = new SensorStreamer(SensorStreamer.DEFAULT_PORT);
             mSensorStreamer.start();
         }
+        if (mVideoStreamer == null) {
+            mVideoStreamer = new VideoStreamer(VideoStreamer.DEFAULT_PORT);
+            mVideoStreamer.start();
+        }
+        mCamera2Proxy.setVideoStreamer(mVideoStreamer);
         if (mGpsManager == null) {
             mGpsManager = new GPSManager(this, mSensorStreamer);
         }
@@ -389,6 +402,7 @@ public class CameraCaptureActivity extends CameraCaptureActivityBase
             Size videoSize = mCamera2Proxy.getmVideoSize();
             mVideoFrameWidth = videoSize.getWidth();
             mVideoFrameHeight = videoSize.getHeight();
+            mCamera2Proxy.setVideoStreamer(mVideoStreamer);
         }
 
         mGLView.onResume();
@@ -426,29 +440,50 @@ public class CameraCaptureActivity extends CameraCaptureActivityBase
         Timber.d("onPause complete");
     }
 
-    /** Shows the phone's IP, whether a PC is listening, and how many lines were sent. */
+    /** Shows the phone's IP and, for each stream, the PC it goes to and how it is doing. */
     private void updateStreamStatus() {
-        if (mSensorStreamer == null || !mSensorStreamer.isRunning()) {
-            mStreamStatusText.setText("UDP port " + SensorStreamer.DEFAULT_PORT + " unavailable");
-            return;
-        }
         List<String> ips = SensorStreamer.localIpv4Addresses();
         String phone = ips.isEmpty() ? "no network" : TextUtils.join(", ", ips);
+        mStreamStatusText.setText("Phone IP: " + phone + "\n" + gpsStatus() + "\n" + videoStatus());
+    }
 
-        InetSocketAddress pc = mSensorStreamer.getSubscriber();
-        String pcState;
-        if (pc == null) {
-            pcState = "waiting for PC";
-        } else if (mSensorStreamer.isSubscriberAlive()) {
-            pcState = "connected " + pc.getAddress().getHostAddress();
-        } else {
-            pcState = "silent for " + mSensorStreamer.getMillisSinceLastSubscribe() / 1000 + " s";
+    private String gpsStatus() {
+        String label = "GPS (UDP " + SensorStreamer.DEFAULT_PORT + "): ";
+        if (mSensorStreamer == null || !mSensorStreamer.isRunning()) {
+            return label + "port unavailable";
         }
+        InetSocketAddress pc = mSensorStreamer.getSubscriber();
+        if (pc == null) {
+            return label + "waiting for PC";
+        }
+        String state = mSensorStreamer.isSubscriberAlive()
+                ? "PC " + pc.getAddress().getHostAddress()
+                : "PC silent for " + mSensorStreamer.getMillisSinceLastSubscribe() / 1000 + " s";
+        return String.format(Locale.US, "%s%s\n  sent %d, dropped %d", label, state,
+                mSensorStreamer.getSentCount(), mSensorStreamer.getDroppedCount());
+    }
 
-        mStreamStatusText.setText(String.format(Locale.US,
-                "Phone IP: %s (UDP %d)\nPC: %s\nSent: %d  dropped: %d",
-                phone, SensorStreamer.DEFAULT_PORT, pcState,
-                mSensorStreamer.getSentCount(), mSensorStreamer.getDroppedCount()));
+    private String videoStatus() {
+        String label = "Video (TCP " + VideoStreamer.DEFAULT_PORT + "): ";
+        if (mVideoStreamer == null || !mVideoStreamer.isRunning()) {
+            return label + "port unavailable";
+        }
+        long now = SystemClock.elapsedRealtime();
+        long frames = mVideoStreamer.getSentCount() - mLastVideoFrames;
+        long bytes = mVideoStreamer.getBytesSent() - mLastVideoBytes;
+        float fps = 1000f * frames / Math.max(1, now - mLastStatusMs);
+        long kbPerFrame = frames > 0 ? bytes / frames / 1024 : 0;
+        mLastStatusMs = now;
+        mLastVideoFrames += frames;
+        mLastVideoBytes += bytes;
+
+        InetAddress pc = mVideoStreamer.getClientAddress();
+        if (pc == null) {
+            return label + "waiting for PC";
+        }
+        return String.format(Locale.US, "%sPC %s\n  %.1f fps, %d KB, jpeg %d ms, dropped %d",
+                label, pc.getHostAddress(), fps, kbPerFrame,
+                mVideoStreamer.getEncodeMillis(), mVideoStreamer.getDroppedCount());
     }
 
     @Override
@@ -456,12 +491,15 @@ public class CameraCaptureActivity extends CameraCaptureActivityBase
         Timber.d("onDestroy");
         super.onDestroy();
         mCameraHandler.invalidateHandler();     // paranoia
-        // Stop location updates and release the UDP port for the next instance of this screen.
+        // Stop location updates and release the ports for the next instance of this screen.
         if (mGpsManager != null) {
             mGpsManager.unregister();
         }
         if (mSensorStreamer != null) {
             mSensorStreamer.stop();
+        }
+        if (mVideoStreamer != null) {
+            mVideoStreamer.stop();
         }
     }
 

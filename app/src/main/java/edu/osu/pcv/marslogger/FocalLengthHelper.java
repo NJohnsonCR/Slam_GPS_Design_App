@@ -3,6 +3,7 @@ package edu.osu.pcv.marslogger;
 // estimate focal length, i.e., imaging distance in pixels, using all sorts of info
 
 import android.annotation.TargetApi;
+import android.graphics.PointF;
 import android.graphics.Rect;
 import android.hardware.camera2.CameraCharacteristics;
 import android.os.Build;
@@ -101,6 +102,31 @@ public class FocalLengthHelper {
             return new SizeF(f_image_pixel, f_image_pixel);
         }
         return new SizeF(1.0f, 1.0f);
+    }
+
+    /**
+     * Principal point (cx, cy) in output image pixels, or the image center if the device
+     * does not report LENS_INTRINSIC_CALIBRATION.
+     */
+    public PointF getPrincipalPoint() {
+        float width = mImageSize.getWidth();
+        float height = mImageSize.getHeight();
+        if (mIntrinsic == null || mIntrinsic[0] <= 1.0 || mCropRegion == null) {
+            return new PointF(width / 2, height / 2);
+        }
+        // The calibration is relative to the pre-correction array, the crop region to the
+        // active array.
+        float cx = mIntrinsic[2];
+        float cy = mIntrinsic[3];
+        if (mPreCorrectionSize != null && mActiveSize != null) {
+            cx += mPreCorrectionSize.left - mActiveSize.left;
+            cy += mPreCorrectionSize.top - mActiveSize.top;
+        }
+        // The output image is centered in the crop region.
+        float scale = imageScale();
+        float left = mCropRegion.exactCenterX() - width / (2 * scale);
+        float top = mCropRegion.exactCenterY() - height / (2 * scale);
+        return new PointF(scale * (cx - left), scale * (cy - top));
     }
 
     /** True if the output image spans the full width of the crop region. */
