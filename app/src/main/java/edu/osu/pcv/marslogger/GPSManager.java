@@ -35,11 +35,22 @@ public class GPSManager {
     private int mFixCount = 0;
 
     /**
-     * @param streamer receives each location.csv row prefixed with "GPS,". May be null.
+     * @param streamer receives every fix as a location.csv row prefixed with "GPS,", also
+     *                 when not recording. May be null.
      */
     public GPSManager(Activity activity, SensorStreamer streamer) {
         mStreamer = streamer;
         locationProvider = new LocationProvider(activity, location -> {
+            String row = location.getElapsedRealtimeNanos() + ","
+                    + location.getLatitude() + ","
+                    + location.getLongitude() + ","
+                    + location.getAltitude() + ","
+                    + location.getSpeed() + ","
+                    + location.getTime() * MILLI_TO_NANO;
+            // Streamed whether or not the phone is recording.
+            if (mStreamer != null) {
+                mStreamer.send("GPS," + row);
+            }
             if (!mRecordingGpsData) {
                 return;
             }
@@ -47,21 +58,11 @@ public class GPSManager {
                 if (mLocationWriter == null) {
                     return;
                 }
-                String row = location.getElapsedRealtimeNanos() + ","
-                        + location.getLatitude() + ","
-                        + location.getLongitude() + ","
-                        + location.getAltitude() + ","
-                        + location.getSpeed() + ","
-                        + location.getTime() * MILLI_TO_NANO;
                 try {
                     mLocationWriter.write(row + "\n");
                     ++mFixCount;
                 } catch (IOException ioe) {
                     Timber.e(ioe, "IOException writing a location fix");
-                }
-                // A failed disk write should not interrupt streaming.
-                if (mStreamer != null) {
-                    mStreamer.send("GPS," + row);
                 }
             }
         });
