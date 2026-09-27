@@ -5,13 +5,14 @@ Receive the GPS fixes the app streams over UDP and print them as they arrive.
 Usage:
     python3 tools/udp_gps_receiver.py <phone_ip> [--port 5001]
 
-Sends "SUBSCRIBE" to the phone every 2 s. The phone answers "SUBSCRIBED" and,
-while recording, sends one line per fix:
+Sends "SUBSCRIBE" to the phone every 2 s. The phone answers "SUBSCRIBED" and
+its recording state, "STATE,RECORDING,<folder>" or "STATE,IDLE", and sends one
+line per fix whether or not it is recording:
 
     GPS,<t_ns>,<lat>,<lon>,<alt>,<speed>,<unix_ns>
 
-A "SUBSCRIBED" reply with no fixes means the network works and the phone is
-either not recording or has no GPS signal.
+A "SUBSCRIBED" reply with no fixes means the network works but the phone has
+no GPS signal.
 """
 import argparse
 import socket
@@ -57,6 +58,7 @@ def main():
     warned = False
     n = 0
     first_t = prev_t = None
+    state = None
 
     print(f"Saludando a {phone[0]}:{phone[1]} ... (Ctrl+C para terminar)")
     try:
@@ -78,8 +80,13 @@ def main():
 
             if message == "SUBSCRIBED":
                 if not subscribed:
-                    print("Conectado. Esperando posiciones (hay que estar grabando).")
+                    print("Conectado. Esperando posiciones.")
                     subscribed = True
+                continue
+            if message.startswith("STATE,"):
+                if message != state:
+                    print(f"Estado del teléfono: {message[len('STATE,'):]}")
+                    state = message
                 continue
 
             fix = parse_gps_line(message)
