@@ -52,6 +52,11 @@ La columna `Unix time` sirve como referencia horaria pero no para alinear. En lo
 
 El teléfono y la PC tienen que estar en la misma red, por ejemplo con el teléfono como punto de acceso. El teléfono espera las conexiones y la PC se conecta a él. La pantalla de video muestra la IP del teléfono y, para cada transmisión, la PC conectada, lo enviado y lo descartado.
 
+El teléfono transmite siempre que haya una PC conectada, grabe o no. La grabación se controla aparte, desde la PC o con el botón del teléfono, y así hay dos modos de uso:
+
+- **Grabar y transmitir:** la PC recibe en vivo y el teléfono guarda una copia completa en disco.
+- **Solo transmitir:** la PC recibe en vivo y el teléfono no ocupa espacio.
+
 ### Video (TCP, puerto 5000)
 
 Mientras la pantalla de video está abierta, grabando o no, la app envía cada frame como JPEG a la PC conectada. Al conectarse, la PC recibe primero una línea con los parámetros de la cámara, en píxeles de la imagen transmitida:
@@ -88,18 +93,38 @@ python tools/video_receiver.py 127.0.0.1
 
 ### GPS (UDP, puerto 5001)
 
-Mientras graba, la app envía cada fila de `location.csv`:
+La app envía cada posición en el formato de las filas de `location.csv`:
 
 ```
 GPS,<t_ns>,<lat>,<lon>,<alt>,<speed>,<unix_ns>
 ```
 
-La PC inicia la conexión enviando el texto `SUBSCRIBE` al puerto 5001 del teléfono, y lo repite cada 2 segundos. El teléfono responde `SUBSCRIBED` y envía las mediciones a la última dirección suscrita. Si pasan 5 segundos sin recibir `SUBSCRIBE`, la pantalla muestra a la PC como inactiva.
+La PC inicia la conexión enviando el texto `SUBSCRIBE` al puerto 5001 del teléfono, y lo repite cada 2 segundos. El teléfono responde `SUBSCRIBED` y su estado (ver abajo), y envía las mediciones a la última dirección suscrita. Si pasan 5 segundos sin recibir `SUBSCRIBE`, la pantalla muestra a la PC como inactiva.
 
 Para probar la recepción desde la PC:
 
 ```bash
 python3 tools/udp_gps_receiver.py <IP_del_teléfono>
+```
+
+### Control de la grabación (UDP, puerto 5001)
+
+La PC inicia y detiene la grabación enviando `START` o `STOP` al mismo puerto. Tienen el mismo efecto que el botón de la pantalla de video, que sigue funcionando. El teléfono responde a cada orden con su estado:
+
+```
+STATE,RECORDING,<carpeta>
+STATE,IDLE
+```
+
+`<carpeta>` es el nombre de la carpeta de la grabación en el teléfono. `IDLE` significa que no está grabando; la transmisión sigue. El teléfono también envía su estado al suscriptor cuando la grabación se inicia o detiene con el botón, y junto con cada `SUBSCRIBED`.
+
+- Una orden puede perderse en la red. La PC la repite hasta recibir el estado esperado; repetirla no tiene efecto si el teléfono ya está en ese estado.
+- Si la app no está en primer plano en la pantalla de video, las órdenes se ignoran y el teléfono responde con su estado actual.
+- Un programa que también recibe las mediciones debe enviar las órdenes desde el mismo socket con el que se suscribe.
+
+```bash
+python3 tools/phone_control.py <IP_del_teléfono> start
+python3 tools/phone_control.py <IP_del_teléfono> stop
 ```
 
 ## Cambios respecto de MARS Logger
@@ -108,6 +133,7 @@ python3 tools/udp_gps_receiver.py <IP_del_teléfono>
 - Se solicitan actualizaciones de ubicación cada 100 ms en lugar de cada 1000 ms.
 - `fx` y `fy` en `movie_metadata.csv` se escalan a la resolución del video cuando el teléfono expone su calibración de fábrica. Antes se escribían en píxeles del sensor.
 - Transmisión del video por TCP y de las posiciones por UDP, con el estado de cada conexión en la pantalla de video.
+- Inicio y detención de la grabación desde la PC.
 - Cálculo del punto principal (`cx`, `cy`) a partir de la calibración de fábrica, para el `HELLO`.
 - Las actualizaciones de ubicación se detienen al salir de la pantalla de video.
 
