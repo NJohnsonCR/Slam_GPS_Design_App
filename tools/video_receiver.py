@@ -93,12 +93,19 @@ def main():
     ap.add_argument("--no-window", action="store_true", help="only print the statistics")
     args = ap.parse_args()
 
+    # OpenCV can take seconds to open its first window; do it before connecting,
+    # or the phone drops frames while nothing reads them.
+    if not args.no_window:
+        cv2.namedWindow(WINDOW)
+        cv2.waitKey(1)
+
     print(f"Conectando a {args.phone_ip}:{args.port} ...")
     try:
         sock = socket.create_connection((args.phone_ip, args.port), timeout=5)
     except OSError as e:
         print(f"No se pudo conectar ({e}). Revisar: misma red WiFi, IP correcta, "
               "y la app abierta en la pantalla de video.")
+        cv2.destroyAllWindows()
         return
     sock.settimeout(10)     # a phone that stops sending ends the script instead of hanging it
     stream = sock.makefile("rb")
@@ -106,13 +113,13 @@ def main():
     hello = parse_hello(stream.readline().decode("ascii", errors="replace"))
     if hello is None:
         print("El teléfono no envió un saludo válido.")
+        sock.close()
+        cv2.destroyAllWindows()
         return
     print(f"Cámara: {hello.width}x{hello.height} a {hello.fps} fps  "
           f"fx {hello.fx:.2f}  fy {hello.fy:.2f}  cx {hello.cx:.2f}  cy {hello.cy:.2f}")
     print("Ctrl+C (o 'q' en la ventana) para terminar.")
 
-    if not args.no_window:
-        cv2.namedWindow(WINDOW)
     interval_ns = 1e9 / hello.fps
     frames = missing = total_bytes = 0
     ages = []
