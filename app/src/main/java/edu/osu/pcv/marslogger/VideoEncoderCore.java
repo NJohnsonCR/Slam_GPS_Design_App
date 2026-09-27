@@ -122,6 +122,10 @@ public class VideoEncoderCore {
         // the raw H.264 elementary stream we get from MediaCodec into a .mp4 file.
         mMuxer = new MediaMuxer(outputFile,
                 MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+        // Frames are encoded upright for a portrait screen, i.e. the sensor image turned 90
+        // degrees clockwise. Players turn them back, so the video shows the sensor image,
+        // upright with the phone held landscape with the camera on the left.
+        mMuxer.setOrientationHint(270);
 
         mTrackIndex = -1;
         mMuxerStarted = false;

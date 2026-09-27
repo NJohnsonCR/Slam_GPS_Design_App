@@ -35,10 +35,10 @@ adb pull /sdcard/Android/data/edu.osu.pcv.marslogger/files/data/<carpeta>
 
 | Archivo | Contenido |
 |---|---|
-| `movie.mp4` | Video H.264. La resolución se elige en los ajustes de la app. |
+| `movie.mp4` | Video H.264 en horizontal, derecho con el teléfono en horizontal y la cámara a la izquierda. La resolución se elige en los ajustes de la app. |
 | `frame_timestamps.txt` | Instante de exposición y hora Unix de cada frame. |
 | `movie_metadata.csv` | Por frame: distancia focal en píxeles del video (`fx`, `fy`), exposición, ISO y enfoque. |
-| `gyro_accel.csv` | Giroscopio, acelerómetro y magnetómetro. |
+| `gyro_accel.csv` | Giroscopio y acelerómetro. |
 | `location.csv` | Latitud, longitud, altitud y velocidad del GPS. |
 | `edge_epochs.txt` | Qué reloj usa la cámara, y los dos relojes al inicio y al final de la grabación. |
 
@@ -47,6 +47,14 @@ adb pull /sdcard/Android/data/edu.osu.pcv.marslogger/files/data/<carpeta>
 Cuando `edge_epochs.txt` indica `SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME` (es el caso del Galaxy S23), la primera columna de todos los archivos está en el mismo reloj, el de `SystemClock.elapsedRealtimeNanos()`. Las filas de cámara, IMU y GPS se alinean directamente por esa columna.
 
 La columna `Unix time` sirve como referencia horaria pero no para alinear. En los archivos de cámara es la hora en que el frame llegó a la app, no la de captura: en el Galaxy S23 queda entre 60 y 75 ms desfasada respecto de la de la IMU y el GPS.
+
+Los frames no siempre están separados exactamente por 1/30 s: la cámara corre el instante de captura cuando la exposición automática cambia de valor. Hay que usar la marca de tiempo de cada frame.
+
+Los primeros frames de cada `movie.mp4`, unos 0.2 s, no muestran la imagen que corresponde a su marca de tiempo, porque el codificador tarda en ponerse al día al empezar a grabar. Desde ahí, cada frame coincide con su marca.
+
+### Orientación del video
+
+Los píxeles de `movie.mp4` están guardados en vertical (720x1280), con una marca de rotación de 270 grados. Los reproductores y OpenCV la aplican al leer el archivo y entregan la imagen en horizontal (1280x720), en la orientación del sensor. Es la misma orientación de la transmisión en vivo, y la que corresponde a `fx` y `fy` de `movie_metadata.csv`.
 
 ## Transmisión en vivo
 
@@ -76,6 +84,7 @@ Después, por cada frame, un encabezado de 20 bytes seguido del JPEG:
 - Los frames no se encolan: si llega uno nuevo mientras el anterior se sigue enviando, el nuevo se descarta. Una red lenta baja la tasa de frames pero no aumenta el retraso.
 - Se atiende a una PC a la vez; una conexión nueva reemplaza a la anterior.
 - La imagen tiene el tamaño del video y la orientación del sensor. Queda derecha con el teléfono en horizontal y la cámara a la izquierda.
+- Mientras se graba, cada frame transmitido es el mismo que se guarda en `movie.mp4` con la misma marca de tiempo.
 - El teléfono no corrige la distorsión del lente, y el `HELLO` no la incluye. En el Galaxy S23, `LENS_DISTORTION` es `[0.0903, -0.1210, 0.0544, 0, 0]` en el orden de Android (k1, k2, k3, p1, p2).
 
 Para ver el video desde la PC (requiere OpenCV):
@@ -134,6 +143,8 @@ python3 tools/phone_control.py <IP_del_teléfono> stop
 - `fx` y `fy` en `movie_metadata.csv` se escalan a la resolución del video cuando el teléfono expone su calibración de fábrica. Antes se escribían en píxeles del sensor.
 - Transmisión del video por TCP y de las posiciones por UDP, con el estado de cada conexión en la pantalla de video.
 - Inicio y detención de la grabación desde la PC.
+- `gyro_accel.csv` ya no incluye el magnetómetro.
+- `movie.mp4` lleva una marca de rotación para reproducirse en horizontal.
 - Cálculo del punto principal (`cx`, `cy`) a partir de la calibración de fábrica, para el `HELLO`.
 - Las actualizaciones de ubicación se detienen al salir de la pantalla de video.
 
