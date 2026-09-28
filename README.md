@@ -58,7 +58,9 @@ Los píxeles de `movie.mp4` están guardados en vertical (720x1280), con una mar
 
 ## Transmisión en vivo
 
-El teléfono y la PC tienen que estar en la misma red, por ejemplo con el teléfono como punto de acceso. El teléfono espera las conexiones y la PC se conecta a él. La pantalla de video muestra la IP del teléfono y, para cada transmisión, la PC conectada, lo enviado y lo descartado.
+El teléfono y la PC tienen que estar en la misma red, por ejemplo con el teléfono como punto de acceso. El teléfono espera las conexiones y la PC se conecta a él. La pantalla de video muestra la IP del teléfono, la frecuencia del GPS y, para cada transmisión, la PC conectada, lo enviado y lo descartado.
+
+Los puertos (5000 y 5001 por defecto) y la calidad del JPEG (80 por defecto) se cambian en los ajustes de la app, sección *Streaming to the PC*, y se aplican al abrir la pantalla de video. Con calidad 60 cada frame pesa aproximadamente la mitad que con 80.
 
 El teléfono transmite siempre que haya una PC conectada, grabe o no. La grabación se controla aparte, desde la PC o con el botón del teléfono, y así hay dos modos de uso:
 
@@ -145,6 +147,8 @@ python3 tools/phone_control.py <IP_del_teléfono> stop
 - Inicio y detención de la grabación desde la PC.
 - `gyro_accel.csv` ya no incluye el magnetómetro.
 - `movie.mp4` lleva una marca de rotación para reproducirse en horizontal.
+- Ajustes de puertos y calidad JPEG, y frecuencia del GPS en la pantalla de video.
+- Las pantallas de la navegación inferior ya no quedan tapadas por la barra de navegación.
 - Cálculo del punto principal (`cx`, `cy`) a partir de la calibración de fábrica, para el `HELLO`.
 - Las actualizaciones de ubicación se detienen al salir de la pantalla de video.
 
