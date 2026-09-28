@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android" >
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto" >
 
     <PreferenceCategory android:title="Camera Settings" >
 <!--        https://v4all123.blogspot.com/2017/10/simple-switchpreference-example-in.html-->
@@ -47,6 +48,32 @@
             android:entries="@array/imuFreq"
             android:entryValues="@array/imuFreqValues"
             android:defaultValue="1" />
+    </PreferenceCategory>
+
+    <!-- Read when the video screen opens. -->
+    <PreferenceCategory android:title="Streaming to the PC" >
+
+        <EditTextPreference
+            android:key="prefVideoPort"
+            android:title="Video port (TCP)"
+            android:dialogTitle="Video port, 1024 to 65535"
+            android:defaultValue="5000"
+            app:useSimpleSummaryProvider="true" />
+
+        <EditTextPreference
+            android:key="prefSensorPort"
+            android:title="GPS and control port (UDP)"
+            android:dialogTitle="GPS and control port, 1024 to 65535"
+            android:defaultValue="5001"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            android:key="prefJpegQuality"
+            android:title="JPEG quality"
+            android:entries="@array/jpegQuality"
+            android:entryValues="@array/jpegQualityValues"
+            android:defaultValue="80"
+            app:useSimpleSummaryProvider="true" />
     </PreferenceCategory>
 
 </PreferenceScreen>
