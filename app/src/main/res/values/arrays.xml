@@ -21,6 +21,21 @@
         <item>3</item>
     </string-array>
 
+    <string-array name="jpegQuality">
+        <item>50 (smallest frames)</item>
+        <item>60</item>
+        <item>70</item>
+        <item>80 (default)</item>
+        <item>90 (sharpest)</item>
+    </string-array>
+    <string-array name="jpegQualityValues">
+        <item>50</item>
+        <item>60</item>
+        <item>70</item>
+        <item>80</item>
+        <item>90</item>
+    </string-array>
+
     <string-array name="gpsFreq">
         <item>Delay 1.0 Sec</item>
         <item>Delay 3.0  Sec</item>

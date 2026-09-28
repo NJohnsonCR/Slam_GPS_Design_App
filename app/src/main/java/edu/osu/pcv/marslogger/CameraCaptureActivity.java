@@ -17,6 +17,7 @@
 package edu.osu.pcv.marslogger;
 
 import android.app.Activity;
+import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.graphics.SurfaceTexture;
 
@@ -33,6 +34,7 @@ import android.text.TextUtils;
 import android.os.Message;
 
 import androidx.annotation.RequiresApi;
+import androidx.preference.PreferenceManager;
 import android.util.Size;
 import android.view.Display;
 import android.view.Surface;
@@ -61,6 +63,7 @@ import javax.microedition.khronos.opengles.GL10;
 import edu.osu.pcv.marslogger.gles.FullFrameRect;
 import edu.osu.pcv.marslogger.gles.Texture2dProgram;
 import edu.osu.pcv.marslogger.streaming.SensorStreamer;
+import edu.osu.pcv.marslogger.streaming.StreamingSettings;
 import edu.osu.pcv.marslogger.streaming.VideoStreamer;
 import timber.log.Timber;
 
@@ -368,16 +371,20 @@ public class CameraCaptureActivity extends CameraCaptureActivityBase
             mCameraHandler.sendMessage(
                     mCameraHandler.obtainMessage(CameraHandler.MSG_MANUAL_FOCUS, focusConfig));
         });
+        // The ports are read once: changing them in the settings takes effect the next time
+        // this screen is opened.
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
         if (mSensorStreamer == null) {
-            mSensorStreamer = new SensorStreamer(SensorStreamer.DEFAULT_PORT);
+            mSensorStreamer = new SensorStreamer(StreamingSettings.sensorPort(prefs));
             mSensorStreamer.setCommandListener(
                     command -> runOnUiThread(() -> onRemoteCommand(command)));
             mSensorStreamer.start();
         }
         if (mVideoStreamer == null) {
-            mVideoStreamer = new VideoStreamer(VideoStreamer.DEFAULT_PORT);
+            mVideoStreamer = new VideoStreamer(StreamingSettings.videoPort(prefs));
             mVideoStreamer.start();
         }
+        mVideoStreamer.setJpegQuality(StreamingSettings.jpegQuality(prefs));
         mCamera2Proxy.setVideoStreamer(mVideoStreamer);
         if (mGpsManager == null) {
             mGpsManager = new GPSManager(this, mSensorStreamer);
@@ -447,16 +454,32 @@ public class CameraCaptureActivity extends CameraCaptureActivityBase
         Timber.d("onPause complete");
     }
 
-    /** Shows the phone's IP and, for each stream, the PC it goes to and how it is doing. */
+    /**
+     * Shows the phone's IP, the GPS rate and, for each stream, the PC it goes to and how it is
+     * doing. Runs only while resumed, after onStart() has created the streamers.
+     */
     private void updateStreamStatus() {
         List<String> ips = SensorStreamer.localIpv4Addresses();
         String phone = ips.isEmpty() ? "no network" : TextUtils.join(", ", ips);
-        mStreamStatusText.setText("Phone IP: " + phone + "\n" + gpsStatus() + "\n" + videoStatus());
+        mStreamStatusText.setText("Phone IP: " + phone + "\n" + gpsStatus() + "\n"
+                + sensorLinkStatus() + "\n" + videoStatus());
     }
 
     private String gpsStatus() {
-        String label = "GPS (UDP " + SensorStreamer.DEFAULT_PORT + "): ";
-        if (mSensorStreamer == null || !mSensorStreamer.isRunning()) {
+        long age = mGpsManager.getMillisSinceLastFix();
+        if (age < 0) {
+            return "GPS: no fix yet";
+        }
+        if (age > 3000) {
+            return "GPS: no fix for " + age / 1000 + " s";
+        }
+        return String.format(Locale.US, "GPS: %.1f Hz, last fix %.1f s ago",
+                mGpsManager.getFixRateHz(), age / 1000f);
+    }
+
+    private String sensorLinkStatus() {
+        String label = "Sensors (UDP " + mSensorStreamer.getPort() + "): ";
+        if (!mSensorStreamer.isRunning()) {
             return label + "port unavailable";
         }
         InetSocketAddress pc = mSensorStreamer.getSubscriber();
@@ -471,8 +494,8 @@ public class CameraCaptureActivity extends CameraCaptureActivityBase
     }
 
     private String videoStatus() {
-        String label = "Video (TCP " + VideoStreamer.DEFAULT_PORT + "): ";
-        if (mVideoStreamer == null || !mVideoStreamer.isRunning()) {
+        String label = "Video (TCP " + mVideoStreamer.getPort() + "): ";
+        if (!mVideoStreamer.isRunning()) {
             return label + "port unavailable";
         }
         long now = SystemClock.elapsedRealtime();

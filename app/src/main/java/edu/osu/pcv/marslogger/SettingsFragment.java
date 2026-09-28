@@ -13,6 +13,7 @@ import android.media.MediaRecorder;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.InputType;
 
 import androidx.annotation.RequiresApi;
 import androidx.preference.EditTextPreference;
@@ -29,6 +30,7 @@ import android.widget.Toast;
 import java.util.Arrays;
 import java.util.Set;
 
+import edu.osu.pcv.marslogger.streaming.StreamingSettings;
 import timber.log.Timber;
 
 /**
@@ -99,6 +101,14 @@ public class SettingsFragment extends PreferenceFragmentCompat
                 getPreferenceScreen().findPreference("prefExposureTime");
 
         prefISO.setOnPreferenceChangeListener(checkISOListener);
+
+        for (String key : new String[]{StreamingSettings.KEY_VIDEO_PORT,
+                StreamingSettings.KEY_SENSOR_PORT}) {
+            EditTextPreference port = findPreference(key);
+            port.setOnBindEditTextListener(
+                    editText -> editText.setInputType(InputType.TYPE_CLASS_NUMBER));
+            port.setOnPreferenceChangeListener(checkPortListener);
+        }
         try {
             Activity activity = getActivity();
             CameraManager manager = (CameraManager) activity.getSystemService(Context.CAMERA_SERVICE);
@@ -211,6 +221,17 @@ public class SettingsFragment extends PreferenceFragmentCompat
             return checkIso(newValue);
         }
     };
+
+    /** Rejects ports outside the range an app can listen on. */
+    private final Preference.OnPreferenceChangeListener checkPortListener =
+            (preference, newValue) -> {
+                if (StreamingSettings.isValidPort(newValue.toString())) {
+                    return true;
+                }
+                Toast.makeText(getActivity(), "Ports go from " + StreamingSettings.MIN_PORT
+                        + " to " + StreamingSettings.MAX_PORT, Toast.LENGTH_SHORT).show();
+                return false;
+            };
 
     private boolean checkIso(Object newValue) {
         if (!newValue.toString().equals("") && newValue.toString().matches("\\d*")) {

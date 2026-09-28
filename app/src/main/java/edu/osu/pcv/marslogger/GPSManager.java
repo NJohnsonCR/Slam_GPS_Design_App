@@ -1,10 +1,12 @@
 package edu.osu.pcv.marslogger;
 
 import android.app.Activity;
+import android.os.SystemClock;
 
 import java.io.BufferedWriter;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.util.ArrayDeque;
 
 import edu.osu.pcv.marslogger.streaming.SensorStreamer;
 import timber.log.Timber;
@@ -23,6 +25,8 @@ public class GPSManager {
             "Unix time[nanosecond]\n";
 
     private static final long MILLI_TO_NANO = 1000000L;
+    // The fix rate shown on screen is averaged over this window.
+    private static final long RATE_WINDOW_NS = 10000000000L;
 
     private final LocationProvider locationProvider;
     private final SensorStreamer mStreamer;
@@ -33,6 +37,9 @@ public class GPSManager {
     private volatile boolean mRecordingGpsData = false;
 
     private int mFixCount = 0;
+
+    // Timestamps of the fixes within the rate window, newest last.
+    private final ArrayDeque<Long> mRecentFixes = new ArrayDeque<>();
 
     /**
      * @param streamer receives every fix as a location.csv row prefixed with "GPS,", also
@@ -47,6 +54,7 @@ public class GPSManager {
                     + location.getAltitude() + ","
                     + location.getSpeed() + ","
                     + location.getTime() * MILLI_TO_NANO;
+            recordFixTime(location.getElapsedRealtimeNanos());
             // Streamed whether or not the phone is recording.
             if (mStreamer != null) {
                 mStreamer.send("GPS," + row);
@@ -102,6 +110,34 @@ public class GPSManager {
             }
             Timber.d("Recorded %d location fixes", mFixCount);
             mLocationWriter = null;
+        }
+    }
+
+    /** Fixes per second over the last 10 s, or 0 with fewer than two fixes. */
+    public float getFixRateHz() {
+        synchronized (mRecentFixes) {
+            long spanNs = mRecentFixes.size() < 2 ? 0
+                    : mRecentFixes.peekLast() - mRecentFixes.peekFirst();
+            return spanNs > 0 ? (mRecentFixes.size() - 1) * 1e9f / spanNs : 0f;
+        }
+    }
+
+    /** Age of the latest fix, or -1 if there has been none. */
+    public long getMillisSinceLastFix() {
+        synchronized (mRecentFixes) {
+            if (mRecentFixes.isEmpty()) {
+                return -1;
+            }
+            return (SystemClock.elapsedRealtimeNanos() - mRecentFixes.peekLast()) / MILLI_TO_NANO;
+        }
+    }
+
+    private void recordFixTime(long timeNs) {
+        synchronized (mRecentFixes) {
+            mRecentFixes.addLast(timeNs);
+            while (timeNs - mRecentFixes.peekFirst() > RATE_WINDOW_NS) {
+                mRecentFixes.removeFirst();
+            }
         }
     }
 
