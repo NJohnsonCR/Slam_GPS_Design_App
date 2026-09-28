@@ -138,6 +138,10 @@ public class SensorStreamer {
         return mRunning;
     }
 
+    public int getPort() {
+        return mPort;
+    }
+
     /** The PC that last sent SUBSCRIBE, or null if none has yet. */
     public InetSocketAddress getSubscriber() {
         return mSubscriber;

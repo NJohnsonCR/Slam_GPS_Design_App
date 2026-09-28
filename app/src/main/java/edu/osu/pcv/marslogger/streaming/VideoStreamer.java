@@ -36,8 +36,8 @@ import timber.log.Timber;
 public class VideoStreamer implements ImageReader.OnImageAvailableListener {
 
     public static final int DEFAULT_PORT = 5000;
+    public static final int DEFAULT_JPEG_QUALITY = 80;
 
-    private static final int JPEG_QUALITY = 80;
     private static final int HEADER_BYTES = 20;
     private static final byte[] EMPTY_HEADER = new byte[HEADER_BYTES];
     // Small, so that a slow network shows up as dropped frames rather than as data
@@ -45,6 +45,7 @@ public class VideoStreamer implements ImageReader.OnImageAvailableListener {
     private static final int SEND_BUFFER_BYTES = 128 * 1024;
 
     private final int mPort;
+    private volatile int mJpegQuality = DEFAULT_JPEG_QUALITY;
     private final AtomicLong mSent = new AtomicLong();
     private final AtomicLong mDropped = new AtomicLong();
     private final AtomicLong mBytesSent = new AtomicLong();
@@ -103,6 +104,11 @@ public class VideoStreamer implements ImageReader.OnImageAvailableListener {
         Timber.i("Video streamer stopped: %d sent, %d dropped", mSent.get(), mDropped.get());
     }
 
+    /** JPEG quality from 1 to 100; lower means smaller frames. Takes effect on the next frame. */
+    public void setJpegQuality(int quality) {
+        mJpegQuality = quality;
+    }
+
     /**
      * Camera parameters for the HELLO line, in pixels of the streamed image.
      * Cheap enough to call on every capture result.
@@ -148,6 +154,10 @@ public class VideoStreamer implements ImageReader.OnImageAvailableListener {
 
     public boolean isRunning() {
         return mRunning;
+    }
+
+    public int getPort() {
+        return mPort;
     }
 
     /** The connected PC, or null if none. */
@@ -245,7 +255,7 @@ public class VideoStreamer implements ImageReader.OnImageAvailableListener {
         frame.reset();
         frame.write(EMPTY_HEADER, 0, HEADER_BYTES);     // filled in once the length is known
         new YuvImage(mNv21, ImageFormat.NV21, mFrameWidth, mFrameHeight, null)
-                .compressToJpeg(new Rect(0, 0, mFrameWidth, mFrameHeight), JPEG_QUALITY, frame);
+                .compressToJpeg(new Rect(0, 0, mFrameWidth, mFrameHeight), mJpegQuality, frame);
         ByteBuffer.wrap(frame.array(), 0, HEADER_BYTES)
                 .putInt(frame.size() - HEADER_BYTES)
                 .putLong(mFrameTimeNs)
