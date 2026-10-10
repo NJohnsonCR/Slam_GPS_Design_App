@@ -390,7 +390,7 @@ public class CameraCaptureActivity extends CameraCaptureActivityBase
             mGpsManager = new GPSManager(this, mSensorStreamer);
         }
         if (mImuManager == null) {
-            mImuManager = new IMUManager(this);
+            mImuManager = new IMUManager(this, mSensorStreamer);
             mTimeBaseManager = new TimeBaseManager();
         }
         mKeyCameraParamsText = (TextView) findViewById(R.id.cameraParams_text);

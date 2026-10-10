@@ -30,6 +30,10 @@ import timber.log.Timber;
  * "STATE,RECORDING,folder" or "STATE,IDLE", and also sends it when recording is started or
  * stopped on the phone. send() never blocks: datagrams are queued for a sender thread and
  * dropped if the queue is full.
+ *
+ * "TIME,pc_ns" asks for the phone's clocks, so the PC can relate its clock to the phone's
+ * boot clock. The phone answers at once with "TIME,pc_ns,unix_ns,t_ns": the PC's value
+ * unchanged, then its Unix time and boot-clock time when the request arrived.
  */
 public class SensorStreamer {
 
@@ -44,6 +48,7 @@ public class SensorStreamer {
 
     private static final String SUBSCRIBE = "SUBSCRIBE";
     private static final String SUBSCRIBED = "SUBSCRIBED";
+    private static final String TIME_PREFIX = "TIME,";
     private static final int QUEUE_CAPACITY = 256;
     // A subscriber that has not sent SUBSCRIBE for this long is reported as silent.
     private static final long SUBSCRIBER_TIMEOUT_MS = 5000;
@@ -208,10 +213,19 @@ public class SensorStreamer {
                 }
                 continue;
             }
+            // Read the clocks first, for TIME requests: any work before this would bias them.
+            long bootNs = SystemClock.elapsedRealtimeNanos();
+            long unixNs = System.currentTimeMillis() * 1000000L;
             String message = new String(packet.getData(), 0, packet.getLength(),
                     StandardCharsets.UTF_8).trim();
             InetSocketAddress from = (InetSocketAddress) packet.getSocketAddress();
-            if (SUBSCRIBE.equals(message)) {
+            if (message.startsWith(TIME_PREFIX)) {
+                // Answered directly rather than through the queue, which would add delay.
+                String pcNs = message.substring(TIME_PREFIX.length());
+                if (isNumber(pcNs)) {
+                    reply(TIME_PREFIX + pcNs + "," + unixNs + "," + bootNs, from);
+                }
+            } else if (SUBSCRIBE.equals(message)) {
                 if (!from.equals(mSubscriber)) {
                     Timber.i("New sensor subscriber: %s", from);
                 }
@@ -229,6 +243,15 @@ public class SensorStreamer {
                     reply(mState, from);
                 }
             }
+        }
+    }
+
+    private static boolean isNumber(String text) {
+        try {
+            Long.parseLong(text);
+            return true;
+        } catch (NumberFormatException e) {
+            return false;
         }
     }
 

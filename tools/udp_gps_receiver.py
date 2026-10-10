@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
-Receive the GPS fixes the app streams over UDP and print them as they arrive.
+Receive the GPS fixes and IMU samples the app streams over UDP. Prints each
+GPS fix as it arrives, and the IMU rate once per second.
 
 Usage:
     python3 tools/udp_gps_receiver.py <phone_ip> [--port 5001]
 
 Sends "SUBSCRIBE" to the phone every 2 s. The phone answers "SUBSCRIBED" and
 its recording state, "STATE,RECORDING,<folder>" or "STATE,IDLE", and sends one
-line per fix whether or not it is recording:
+datagram per GPS fix and per IMU sample, whether or not it is recording:
 
     GPS,<t_ns>,<lat>,<lon>,<alt>,<speed>,<unix_ns>
+    IMU,<t_ns>,<gx>,<gy>,<gz>,<ax>,<ay>,<az>,<unix_ns>
 
 A "SUBSCRIBED" reply with no fixes means the network works but the phone has
 no GPS signal.
@@ -41,6 +43,25 @@ def parse_gps_line(line: str) -> Optional[GpsFix]:
         return None
 
 
+class ImuSample(NamedTuple):
+    t_ns: int           # gyroscope timestamp, same clock as the camera frames and GPS
+    gyro: tuple         # rad/s, device axes
+    accel: tuple        # m/s^2, device axes, interpolated to t_ns
+    unix_ns: int
+
+
+def parse_imu_line(line: str) -> Optional[ImuSample]:
+    """Parse an 'IMU,...' line. Returns None if the line is malformed."""
+    parts = line.strip().split(",")
+    if len(parts) != 9 or parts[0] != "IMU":
+        return None
+    try:
+        values = [float(v) for v in parts[2:8]]
+        return ImuSample(int(parts[1]), tuple(values[:3]), tuple(values[3:]), int(parts[8]))
+    except ValueError:
+        return None
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -59,11 +80,24 @@ def main():
     n = 0
     first_t = prev_t = None
     state = None
+    imu_total = imu_window = imu_backwards = 0
+    imu_first_t = imu_last = None
+    window_start = time.monotonic()
 
     print(f"Saludando a {phone[0]}:{phone[1]} ... (Ctrl+C para terminar)")
     try:
         while True:
             now = time.monotonic()
+            if imu_window and now - window_start >= 1.0:
+                # Rate from the phone's own timestamps, so network bunching does not skew it.
+                span = (imu_last.t_ns - imu_first_t) / 1e9
+                rate = (imu_window - 1) / span if span > 0 else float("nan")
+                g = imu_last.gyro
+                print(f"IMU: {imu_window:3d} muestras ({rate:5.1f} Hz)  t_ns {imu_last.t_ns}  "
+                      f"giro {g[0]:+.3f} {g[1]:+.3f} {g[2]:+.3f} rad/s  "
+                      f"marcas que retroceden: {imu_backwards}")
+                imu_window = 0
+                window_start = now
             if now - last_subscribe >= 2.0:
                 sock.sendto(b"SUBSCRIBE", phone)
                 last_subscribe = now
@@ -89,6 +123,17 @@ def main():
                     state = message
                 continue
 
+            imu = parse_imu_line(message)
+            if imu is not None:
+                if imu_last is not None and imu.t_ns <= imu_last.t_ns:
+                    imu_backwards += 1
+                if imu_window == 0:
+                    imu_first_t = imu.t_ns
+                imu_total += 1
+                imu_window += 1
+                imu_last = imu
+                continue
+
             fix = parse_gps_line(message)
             if fix is None:
                 print(f"Línea no reconocida: {message!r}")
@@ -104,7 +149,7 @@ def main():
             print(f"#{n:4d}  lat {fix.lat:.7f}  lon {fix.lon:.7f}  "
                   f"v {fix.speed:5.2f} m/s  dt {dt:7.1f} ms  tasa {rate:4.2f} Hz")
     except KeyboardInterrupt:
-        print(f"\n{n} posiciones recibidas.")
+        print(f"\n{n} posiciones y {imu_total} muestras de IMU recibidas.")
 
 
 if __name__ == "__main__":

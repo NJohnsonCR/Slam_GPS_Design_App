@@ -19,6 +19,7 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Iterator;
 
+import edu.osu.pcv.marslogger.streaming.SensorStreamer;
 import timber.log.Timber;
 
 public class IMUManager implements SensorEventListener {
@@ -71,7 +72,18 @@ public class IMUManager implements SensorEventListener {
     private Deque<SensorPacket> mGyroData = new ArrayDeque<>();
     private Deque<SensorPacket> mAccelData = new ArrayDeque<>();
 
+    private final SensorStreamer mStreamer;
+
     public IMUManager(Activity activity) {
+        this(activity, null);
+    }
+
+    /**
+     * @param streamer receives every synced sample as a gyro_accel.csv row prefixed with
+     *                 "IMU,", also when not recording. May be null.
+     */
+    public IMUManager(Activity activity, SensorStreamer streamer) {
+        mStreamer = streamer;
         mSensorManager = (SensorManager) activity.getSystemService(Context.SENSOR_SERVICE);
         mAccel = mSensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
         mGyro = mSensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
@@ -206,6 +218,10 @@ public class IMUManager implements SensorEventListener {
             mGyroData.add(sp);
             SensorPacket syncedData = syncInertialData();
 
+            // Streamed whether or not the phone is recording.
+            if (syncedData != null && mStreamer != null) {
+                mStreamer.send("IMU," + syncedData.toString());
+            }
             if (syncedData != null && mRecordingInertialData) {
                 try {
                     mDataWriter.write(syncedData.toString() + "\n");

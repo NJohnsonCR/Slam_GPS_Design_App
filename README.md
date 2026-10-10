@@ -102,13 +102,16 @@ adb forward tcp:5000 tcp:5000
 python tools/video_receiver.py 127.0.0.1
 ```
 
-### GPS (UDP, puerto 5001)
+### GPS e IMU (UDP, puerto 5001)
 
-La app envía cada posición en el formato de las filas de `location.csv`:
+La app envía cada posición del GPS y cada muestra de la IMU en un datagrama propio, con el formato de las filas de `location.csv` y `gyro_accel.csv`:
 
 ```
 GPS,<t_ns>,<lat>,<lon>,<alt>,<speed>,<unix_ns>
+IMU,<t_ns>,<gx>,<gy>,<gz>,<ax>,<ay>,<az>,<unix_ns>
 ```
+
+La IMU llega a unos 53 Hz: giroscopio en rad/s y acelerómetro en m/s², en los ejes del teléfono, con el acelerómetro interpolado al instante de cada muestra del giroscopio. `<t_ns>` está en el mismo reloj que los frames y el GPS.
 
 La PC inicia la conexión enviando el texto `SUBSCRIBE` al puerto 5001 del teléfono, y lo repite cada 2 segundos. El teléfono responde `SUBSCRIBED` y su estado (ver abajo), y envía las mediciones a la última dirección suscrita. Si pasan 5 segundos sin recibir `SUBSCRIBE`, la pantalla muestra a la PC como inactiva.
 
@@ -117,6 +120,16 @@ Para probar la recepción desde la PC:
 ```bash
 python3 tools/udp_gps_receiver.py <IP_del_teléfono>
 ```
+
+### Consulta de hora (UDP, puerto 5001)
+
+Para medir la latencia sin depender de que los relojes del teléfono y la PC estén sincronizados, la PC envía `TIME,<pc_ns>` (su hora Unix en ns) y el teléfono responde de inmediato:
+
+```
+TIME,<pc_ns>,<unix_ns>,<t_ns>
+```
+
+`<pc_ns>` vuelve sin cambios; `<unix_ns>` y `<t_ns>` son la hora Unix y el reloj de `elapsedRealtimeNanos()` del teléfono al recibir el pedido. Con la hora de llegada de la respuesta, la PC estima la relación entre su reloj y el del teléfono con un error de la mitad del tiempo de ida y vuelta. El pedido no suscribe a la PC.
 
 ### Control de la grabación (UDP, puerto 5001)
 
@@ -143,7 +156,7 @@ python3 tools/phone_control.py <IP_del_teléfono> stop
 - `location.csv` reemplaza a `gps.csv` y `all_gps.csv`. Las posiciones usan el reloj de la cámara y la IMU en lugar de la hora del sistema en milisegundos, e incluyen la velocidad.
 - Se solicitan actualizaciones de ubicación cada 100 ms en lugar de cada 1000 ms.
 - `fx` y `fy` en `movie_metadata.csv` se escalan a la resolución del video cuando el teléfono expone su calibración de fábrica. Antes se escribían en píxeles del sensor.
-- Transmisión del video por TCP y de las posiciones por UDP, con el estado de cada conexión en la pantalla de video.
+- Transmisión del video por TCP y del GPS y la IMU por UDP, con el estado de cada conexión en la pantalla de video.
 - Inicio y detención de la grabación desde la PC.
 - `gyro_accel.csv` ya no incluye el magnetómetro.
 - `movie.mp4` lleva una marca de rotación para reproducirse en horizontal.
